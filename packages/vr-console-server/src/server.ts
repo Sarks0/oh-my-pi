@@ -17,10 +17,38 @@
  */
 import { join } from "node:path";
 import { OmpSessionAdapter } from "./adapter/omp-session-adapter";
+import { getCampaign, listCampaigns } from "./campaign/reader";
 
 const PORT = Number(process.env.PORT ?? 8800);
 const CWD = process.env.VR_CONSOLE_CWD ?? process.cwd();
+const LAB_ROOT = (process.env.VR_LAB_ROOT ?? "").trim();
 const INDEX_HTML = join(import.meta.dir, "..", "public", "index.html");
+
+function json(body: unknown, status = 200): Response {
+	return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+}
+function requireLabRoot(): string {
+	if (!LAB_ROOT) throw new Error("VR_LAB_ROOT is not set — point it at the vr-lab checkout");
+	return LAB_ROOT;
+}
+
+/** Read-only campaign REST API (DESIGN §3/§5 — host FS is truth; never writes). */
+async function handleApi(url: URL): Promise<Response | undefined> {
+	if (url.pathname === "/api/health") {
+		return json({ ok: true, cwd: CWD, labRoot: LAB_ROOT || null });
+	}
+	if (url.pathname === "/api/campaigns") {
+		const scope = (url.searchParams.get("scope") as "active" | "archived" | "all") ?? "active";
+		return json(await listCampaigns(requireLabRoot(), scope));
+	}
+	const m = url.pathname.match(/^\/api\/campaigns\/([^/]+?)(\/findings)?$/);
+	if (m) {
+		const camp = await getCampaign(requireLabRoot(), decodeURIComponent(m[1]));
+		if (!camp) return json({ error: "campaign not found" }, 404);
+		return json(m[2] ? camp.findings : camp);
+	}
+	return undefined;
+}
 
 const sockets = new Set<Bun.ServerWebSocket<unknown>>();
 function broadcast(frame: unknown): void {
@@ -43,6 +71,14 @@ const server = Bun.serve({
 		if (url.pathname === "/ws") {
 			if (srv.upgrade(req)) return;
 			return new Response("websocket upgrade failed", { status: 400 });
+		}
+		if (url.pathname.startsWith("/api/")) {
+			try {
+				const res = await handleApi(url);
+				if (res) return res;
+			} catch (err) {
+				return json({ error: String(err) }, err instanceof Error && /VR_LAB_ROOT/.test(err.message) ? 400 : 500);
+			}
 		}
 		if (url.pathname === "/" || url.pathname === "/index.html") {
 			return new Response(Bun.file(INDEX_HTML), { headers: { "content-type": "text/html; charset=utf-8" } });

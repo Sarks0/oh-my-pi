@@ -16,7 +16,7 @@
  *   setToolUIContext    sdk.ts:4725   | mcpManager.waitForStartup / getTools  mcp/manager.ts
  *   session.refreshMCPTools + getTools  print-mode.ts:414-419
  */
-import { createAgentSession, SessionManager, Settings } from "@oh-my-pi/pi-coding-agent";
+import { createAgentSession, discoverMCPServers, SessionManager, Settings } from "@oh-my-pi/pi-coding-agent";
 import { createConsoleUIContext } from "../approval/ui-context";
 import { compileApprovalPolicy, summarizePolicy } from "../approval/policy";
 import { PendingRegistry } from "../approval/pending";
@@ -38,11 +38,37 @@ export class OmpSessionAdapter {
 	async start(cwd: string): Promise<void> {
 		this.broadcast({ type: "notice", level: "info", message: `creating agent session (cwd=${cwd})` });
 
-		// Fail-safe approval posture. NOTE: no `autoApprove` option — that is the yolo
-		// posture the spike used and that this adapter exists to remove.
+		// Pre-discover MCP so the per-tool policy can be keyed by the LIVE minted names
+		// (omp has no glob matching — DESIGN §7.3). Minting is deterministic, and we
+		// reuse this same manager for the session, so there is no double-connect.
+		let seededPolicy: Record<string, "allow" | "deny" | "prompt"> = {};
+		let discoveredManager: any;
+		try {
+			const disc = await discoverMCPServers(cwd);
+			discoveredManager = disc.manager;
+			const names = disc.tools.map((t: any) => t.name as string);
+			seededPolicy = compileApprovalPolicy(names);
+			const s = summarizePolicy(seededPolicy);
+			this.broadcast({
+				type: "notice",
+				level: "info",
+				message: `discovered ${names.length} MCP tools (${disc.connectedServers.length} servers); policy → allow ${s.allow} / prompt ${s.prompt}`,
+			});
+		} catch (err) {
+			this.broadcast({ type: "notice", level: "warn", message: `MCP discovery failed: ${String(err)}; defaulting to always-ask only` });
+		}
+
+		// Approval posture: always-ask (the fail-safe default — omp tiers every MCP
+		// tool as write) + the narrowing policy (auto-allow read-only queries). NO
+		// `autoApprove` option — that is the yolo posture this adapter exists to remove.
 		const base = await Settings.init({ cwd });
 		const settings = base.overlay(
-			{ "tools.approvalMode": "always-ask", "autolearn.enabled": false, "memory.backend": "off" },
+			{
+				"tools.approvalMode": "always-ask",
+				"tools.approval": seededPolicy,
+				"autolearn.enabled": false,
+				"memory.backend": "off",
+			},
 			{ derived: true },
 		);
 
@@ -50,12 +76,13 @@ export class OmpSessionAdapter {
 			cwd,
 			sessionManager: SessionManager.inMemory(cwd),
 			settings,
+			mcpManager: discoveredManager, // reuse the discovered manager (no re-connect)
 			enableMCP: true,
 			enableLsp: false,
 			hasUI: false, // headless session…
 		});
 		this.#session = res.session;
-		this.#mcpManager = res.mcpManager;
+		this.#mcpManager = res.mcpManager ?? discoveredManager;
 
 		// …but DO supply a tool-approval UI: the `true` enables tool dialogs
 		// (sdk.ts:959 "hasUI only enables tool dialogs"), so approve() fires.
@@ -68,15 +95,7 @@ export class OmpSessionAdapter {
 			try {
 				await this.#mcpManager.waitForStartup(MCP_STARTUP_TIMEOUT_MS);
 				await this.#session.refreshMCPTools(this.#mcpManager.getTools());
-				const names = this.#mcpManager.getTools().map((t: any) => t.name as string);
-				const policy = compileApprovalPolicy(names);
-				const s = summarizePolicy(policy);
-				this.broadcast({
-					type: "notice",
-					level: "info",
-					message: `MCP ready: ${names.length} tools; ruleset → allow ${s.allow} / prompt ${s.prompt} (every MCP tool still cards under always-ask until narrowing lands in Increment 2)`,
-				});
-				// Increment 2: apply `policy` to the live settings so read-only queries auto-run.
+				this.broadcast({ type: "notice", level: "info", message: "MCP servers ready" });
 			} catch (err) {
 				this.broadcast({ type: "notice", level: "warn", message: `MCP startup issue: ${String(err)}` });
 			}

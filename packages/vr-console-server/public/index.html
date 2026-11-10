@@ -44,6 +44,7 @@
 		<footer>
 			<input id="prompt" placeholder="Prompt the agent…  (read-only tasks only — tool calls now raise approval cards)" autofocus />
 			<button class="go" id="send">Send</button>
+			<button id="campaigns" title="GET /api/campaigns">Campaigns</button>
 		</footer>
 
 		<script>
@@ -165,6 +166,20 @@
 			}
 			document.getElementById("send").onclick = sendPrompt;
 			promptEl.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendPrompt(); } });
+
+			document.getElementById("campaigns").onclick = async () => {
+				try {
+					const r = await fetch("/api/campaigns?scope=all");
+					const data = await r.json();
+					if (!r.ok) { append("notice error", "· /api/campaigns → " + (data.error || r.status)); return; }
+					if (!data.length) { append("notice", "· no campaigns found (set VR_LAB_ROOT to the vr-lab checkout)"); return; }
+					for (const c of data) {
+						append("tool", `▸ ${c.id} [${c.platform}${c.archived ? " · archived" : ""}]  ` +
+							`H:${c.counts.hallucinations} F:${c.counts.findings} R:${c.counts.rejected} S:${c.counts.surfaces}` +
+							(c.title ? `  (${c.title})` : ""));
+					}
+				} catch (err) { append("notice error", "· campaigns fetch failed: " + err); }
+			};
 		</script>
 	</body>
 </html>
