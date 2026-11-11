@@ -32,6 +32,15 @@ export interface SurfaceSummary {
 	raw: Record<string, unknown>;
 }
 
+/** A gate from finding.yaml's `gates` dict (campaign-mcp gates.py model). */
+export type GateStatus = "not_started" | "in_progress" | "passed" | "failed" | "blocked" | "not_applicable";
+export interface GateInfo {
+	name: string;
+	status: GateStatus;
+	required: boolean;
+	evidence_count: number;
+}
+
 export interface FindingSummary {
 	id: string;
 	/** Derived from the directory (authoritative), not finding.yaml. */
@@ -39,9 +48,25 @@ export interface FindingSummary {
 	dir: "hallucinations" | "findings" | "rejected";
 	surface_id?: string;
 	security_invariant?: string;
-	/** Gate names present under evidence/, sorted (e.g. gate0_poc_compiles). */
-	gates: string[];
+	/** Real gate status from finding.yaml's `gates` dict (empty if none recorded yet). */
+	gates: GateInfo[];
 	raw: Record<string, unknown>;
+}
+
+/** One file under a finding's evidence/<gate>/ tree. */
+export interface EvidenceFile {
+	gate: string;
+	name: string;
+	size: number;
+	/** Relative to the finding dir, e.g. "evidence/gate0_poc_compiles/poc.c". */
+	rel: string;
+}
+
+export interface FindingDetail extends FindingSummary {
+	campaign_id: string;
+	source?: string;
+	sink?: string;
+	evidence_files: EvidenceFile[];
 }
 
 export interface CampaignDetail extends CampaignSummary {
