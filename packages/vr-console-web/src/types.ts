@@ -58,4 +58,16 @@ export interface Programme {
 	max_payout?: number;
 }
 
+export interface ApprovalRecord {
+	id: string;
+	campaign_id?: string | null;
+	session_cwd?: string | null;
+	compact?: string | null;
+	status: "pending" | "allowed" | "denied" | "timeout";
+	answer?: string | null;
+	decision_source?: string | null;
+	raised_at: string;
+	decided_at?: string | null;
+}
+
 export type WsFrame = { type: string; [k: string]: unknown };

@@ -31,10 +31,11 @@ export class OmpSessionAdapter {
 	#mcpManager: any;
 	#unsub: (() => void) | undefined;
 
-	/** opts.onRawEvent taps the UNSHAPED event stream (e.g. for the cost ledger). */
+	/** opts.onRawEvent taps the UNSHAPED event stream (e.g. for the cost ledger);
+	 *  opts.approvalAuditor records approve/deny decisions. */
 	constructor(
 		private broadcast: Broadcast,
-		private opts: { onRawEvent?: (ev: unknown) => void } = {},
+		private opts: { onRawEvent?: (ev: unknown) => void; approvalAuditor?: import("../approval/audit").ApprovalAuditor } = {},
 	) {
 		this.pending = new PendingRegistry(broadcast);
 	}
@@ -90,7 +91,7 @@ export class OmpSessionAdapter {
 
 		// …but DO supply a tool-approval UI: the `true` enables tool dialogs
 		// (sdk.ts:959 "hasUI only enables tool dialogs"), so approve() fires.
-		res.setToolUIContext(createConsoleUIContext(this.broadcast, this.pending), true);
+		res.setToolUIContext(createConsoleUIContext(this.broadcast, this.pending, this.opts.approvalAuditor), true);
 
 		this.#unsub = this.#session.subscribe((ev: any) => {
 			this.broadcast(shapeEvent(ev));

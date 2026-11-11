@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { type Db, makeDb, migrate } from "./client";
 import { syncCampaigns } from "./projection";
 import { costSummary, recordUsage, usageFromEvent } from "../cost/ledger";
+import { listApprovalRecords, recordRaise, recordResolve } from "../approval/audit";
 
 const URL = process.env.TEST_DATABASE_URL;
 const suite = URL ? describe : describe.skip; // skip cleanly when no test DB is configured
@@ -16,7 +17,7 @@ suite("Postgres projection + cost ledger", () => {
 	beforeAll(async () => {
 		sql = makeDb(URL as string);
 		await migrate(sql);
-		await sql.unsafe("TRUNCATE campaigns_mirror, findings_mirror, llm_usage, sync_state");
+		await sql.unsafe("TRUNCATE campaigns_mirror, findings_mirror, llm_usage, sync_state, approval_records");
 
 		LAB = await mkdtemp(join(tmpdir(), "vrlab-db-"));
 		const camp = join(LAB, "campaigns", "active", "camp-db_1");
@@ -28,7 +29,7 @@ suite("Postgres projection + cost ledger", () => {
 	});
 
 	afterAll(async () => {
-		await sql.unsafe("TRUNCATE campaigns_mirror, findings_mirror, llm_usage, sync_state");
+		await sql.unsafe("TRUNCATE campaigns_mirror, findings_mirror, llm_usage, sync_state, approval_records");
 		await sql.end();
 		await rm(LAB, { recursive: true, force: true });
 	});
@@ -88,5 +89,23 @@ suite("Postgres projection + cost ledger", () => {
 		expect(s.total_tokens).toBe(300);
 		expect(s.total_cost).toBeCloseTo(0.03);
 		expect(s.by_model[0].model).toBe("m1");
+	});
+
+	test("approval audit: raise writes pending, resolve transitions status", async () => {
+		await recordRaise(sql, "approval_1", { full: "run lab-mcp WinRM on canary", compact: "lab winrm", sessionOffered: false, campaignId: "camp-db_1", cwd: "/x" });
+		await recordRaise(sql, "approval_2", { compact: "revert snapshot", sessionOffered: true, campaignId: "camp-db_1" });
+		let rows = (await listApprovalRecords(sql)) as any[];
+		expect(rows.length).toBe(2);
+		expect(rows.find(r => r.id === "approval_1").status).toBe("pending");
+
+		await recordResolve(sql, "approval_1", "once");
+		await recordResolve(sql, "approval_2", "deny");
+		rows = (await listApprovalRecords(sql)) as any[];
+		const byId = Object.fromEntries(rows.map(r => [r.id, r]));
+		expect(byId.approval_1.status).toBe("allowed");
+		expect(byId.approval_1.answer).toBe("once");
+		expect(byId.approval_1.decided_at).not.toBeNull();
+		expect(byId.approval_2.status).toBe("denied");
+		expect(byId.approval_2.answer).toBe("deny");
 	});
 });
