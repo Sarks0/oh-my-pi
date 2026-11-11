@@ -58,7 +58,20 @@ VR_LAB_ROOT=/path/to/vr-lab VR_CONSOLE_CWD=/path/to/vr-lab/campaigns/active/<id>
 ```
 
 Env: `PORT` (8800), `VR_CONSOLE_CWD` (agent session cwd), `VR_LAB_ROOT` (vr-lab checkout
-for the campaign API). Model/auth come from omp's own on-host config.
+for the campaign API), `DATABASE_URL` (optional Postgres — enables the cost ledger +
+projection), `VR_CONSOLE_WEB_DIST` (override the served SPA dir). Model/auth come from
+omp's own on-host config.
+
+### Optional Postgres (cost ledger + projection, DESIGN §3/§9)
+
+Set `DATABASE_URL=postgres://…` to enable it (the schema migrates on startup). Without
+it the console runs on FS reads alone. When enabled:
+
+- `GET /api/cost` / `GET /api/cost/recent` — the token/cost ledger, tapped from omp's
+  own `usage.cost.total` at `message_end`.
+- `GET /api/projection/sync` — reflect host campaign state into the mirror tables
+  (one-way, host FS → Postgres; the mirror is never written back — campaign-mcp stays
+  the source of truth and sole promoter).
 
 ## Tests
 
