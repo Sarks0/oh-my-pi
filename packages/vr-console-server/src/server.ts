@@ -22,7 +22,23 @@ import { getCampaign, listCampaigns } from "./campaign/reader";
 const PORT = Number(process.env.PORT ?? 8800);
 const CWD = process.env.VR_CONSOLE_CWD ?? process.cwd();
 const LAB_ROOT = (process.env.VR_LAB_ROOT ?? "").trim();
-const INDEX_HTML = join(import.meta.dir, "..", "public", "index.html");
+const DEBUG_HTML = join(import.meta.dir, "..", "public", "index.html");
+// Built vr-console-web SPA (the real UI). Falls back to the debug page if unbuilt.
+const WEB_DIST = process.env.VR_CONSOLE_WEB_DIST ?? join(import.meta.dir, "..", "..", "vr-console-web", "dist");
+
+/** Serve a file from the web dist, guarding against path escape. Returns undefined if absent. */
+async function serveWeb(pathname: string): Promise<Response | undefined> {
+	const rel = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
+	if (rel.includes("..")) return undefined;
+	const file = Bun.file(join(WEB_DIST, rel));
+	if (await file.exists()) return new Response(file);
+	// SPA fallback: unknown non-asset path → index.html (client router handles it)
+	if (!rel.includes(".")) {
+		const idx = Bun.file(join(WEB_DIST, "index.html"));
+		if (await idx.exists()) return new Response(idx, { headers: { "content-type": "text/html; charset=utf-8" } });
+	}
+	return undefined;
+}
 
 function json(body: unknown, status = 200): Response {
 	return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -80,8 +96,10 @@ const server = Bun.serve({
 				return json({ error: String(err) }, err instanceof Error && /VR_LAB_ROOT/.test(err.message) ? 400 : 500);
 			}
 		}
-		if (url.pathname === "/" || url.pathname === "/index.html") {
-			return new Response(Bun.file(INDEX_HTML), { headers: { "content-type": "text/html; charset=utf-8" } });
+		const web = await serveWeb(url.pathname);
+		if (web) return web;
+		if (url.pathname === "/" || url.pathname === "/index.html" || url.pathname === "/debug") {
+			return new Response(Bun.file(DEBUG_HTML), { headers: { "content-type": "text/html; charset=utf-8" } });
 		}
 		return new Response("not found", { status: 404 });
 	},

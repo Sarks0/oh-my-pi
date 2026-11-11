@@ -1,0 +1,20 @@
+{
+	"name": "@oh-my-pi/vr-console-web",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "VR Console frontend — React SPA (dashboard, campaign workspace, findings/gates board, live session + approval cards). Served by vr-console-server.",
+	"scripts": {
+		"build": "bun build src/main.tsx --outdir dist --target browser --minify && cp public/index.html dist/index.html && cp src/app.css dist/app.css",
+		"dev": "bun build src/main.tsx --outdir dist --target browser --watch"
+	},
+	"dependencies": {
+		"react": "catalog:",
+		"react-dom": "catalog:"
+	},
+	"devDependencies": {
+		"@types/bun": "catalog:",
+		"@types/react": "catalog:",
+		"@types/react-dom": "catalog:"
+	}
+}

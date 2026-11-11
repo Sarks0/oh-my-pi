@@ -308,6 +308,19 @@
         "@types/bun": "catalog:",
       },
     },
+    "packages/vr-console-web": {
+      "name": "@oh-my-pi/vr-console-web",
+      "version": "0.0.0",
+      "dependencies": {
+        "react": "catalog:",
+        "react-dom": "catalog:",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+        "@types/react": "catalog:",
+        "@types/react-dom": "catalog:",
+      },
+    },
     "packages/wire": {
       "name": "@oh-my-pi/pi-wire",
       "version": "18.18.6",
@@ -668,6 +681,8 @@
     "@oh-my-pi/vr-console-server": ["@oh-my-pi/vr-console-server@workspace:packages/vr-console-server"],
 
     "@oh-my-pi/vr-console-spike": ["@oh-my-pi/vr-console-spike@workspace:packages/vr-console-spike"],
+
+    "@oh-my-pi/vr-console-web": ["@oh-my-pi/vr-console-web@workspace:packages/vr-console-web"],
 
     "@opentelemetry/api": ["@opentelemetry/api@1.9.1", "", {}, "sha512-gLyJlPHPZYdAk1JENA9LeHejZe1Ti77/pTeFm/nMXmQH/HFZlcS/O2XJB+L8fkbrNSqhdtlvjBVjxwUYanNH5Q=="],
 
