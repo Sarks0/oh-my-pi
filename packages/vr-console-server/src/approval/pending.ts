@@ -24,11 +24,17 @@ export class PendingRegistry {
 
 	/** Push `frame` (with a fresh id) to the browser and await its reply value. */
 	request(kind: string, frame: Record<string, unknown>): Promise<unknown> {
+		return this.requestWithId(kind, frame).promise;
+	}
+
+	/** Like {@link request}, but also returns the minted id (for correlating an audit). */
+	requestWithId(kind: string, frame: Record<string, unknown>): { id: string; promise: Promise<unknown> } {
 		const id = kind + "_" + ++this.#seq;
-		return new Promise(resolve => {
+		const promise = new Promise<unknown>(resolve => {
 			this.#pending.set(id, { resolve, kind });
 			this.broadcast({ ...frame, type: frame.type ?? kind, id });
 		});
+		return { id, promise };
 	}
 
 	/** Resolve the request `id` with the browser's value. Returns false if unknown/stale. */

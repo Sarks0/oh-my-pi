@@ -64,3 +64,25 @@ CREATE TABLE IF NOT EXISTS sync_state (
 	v           JSONB,
 	updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- ── console-owned: approval audit (DESIGN §7.6, modeled on ARTEX intercept_pending)
+-- A row at RAISE (pending) and an UPDATE at RESOLVE, so a crash leaves a pending/
+-- timeout forensic trail. This is the answer to "who approved the WinRM exec that
+-- touched canary, and when" — projection only; campaign-mcp stays the authority.
+-- Only the rendered prompt (full/compact) is stored; approve() gets no structured
+-- tool name at this seam, and arg previews are already redaction-capped upstream.
+CREATE TABLE IF NOT EXISTS approval_records (
+	id               TEXT PRIMARY KEY,   -- the approval request id
+	campaign_id      TEXT,
+	session_cwd      TEXT,
+	prompt_compact   TEXT,
+	prompt_full      TEXT,               -- "full" is a reserved keyword in Postgres
+	session_offered  BOOLEAN NOT NULL DEFAULT false,
+	grants           JSONB,
+	status           TEXT NOT NULL DEFAULT 'pending',   -- pending | allowed | denied | timeout
+	answer           TEXT,                              -- once | session | deny | grant:folder | grant:target
+	decision_source  TEXT,                              -- human | rule | model
+	raised_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+	decided_at       TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS approval_records_raised_idx ON approval_records (raised_at DESC);
