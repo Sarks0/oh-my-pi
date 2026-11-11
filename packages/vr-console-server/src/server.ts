@@ -18,10 +18,28 @@
 import { join } from "node:path";
 import { OmpSessionAdapter } from "./adapter/omp-session-adapter";
 import { getCampaign, listCampaigns } from "./campaign/reader";
+import { type Db, makeDb, migrate } from "./db/client";
+import { syncCampaigns } from "./db/projection";
+import { costSummary, recentUsage, recordUsage, usageFromEvent } from "./cost/ledger";
 
 const PORT = Number(process.env.PORT ?? 8800);
 const CWD = process.env.VR_CONSOLE_CWD ?? process.cwd();
 const LAB_ROOT = (process.env.VR_LAB_ROOT ?? "").trim();
+const DB_URL = (process.env.DATABASE_URL ?? "").trim();
+
+// Optional Postgres: when DATABASE_URL is set, migrate + enable the cost ledger and
+// projection. Without it the console runs on FS reads alone.
+let db: Db | undefined;
+if (DB_URL) {
+	db = makeDb(DB_URL);
+	await migrate(db);
+	console.log("[vr-console-server] Postgres connected; cost ledger + projection enabled");
+}
+
+/** Campaign id if CWD is a campaign dir (…/campaigns/{active,archived}/<id>[/…]). */
+function campaignIdFromCwd(cwd: string): string | undefined {
+	return cwd.match(/\/campaigns\/(?:active|archived)\/([^/]+)/)?.[1];
+}
 const DEBUG_HTML = join(import.meta.dir, "..", "public", "index.html");
 // Built vr-console-web SPA (the real UI). Falls back to the debug page if unbuilt.
 const WEB_DIST = process.env.VR_CONSOLE_WEB_DIST ?? join(import.meta.dir, "..", "..", "vr-console-web", "dist");
@@ -51,7 +69,17 @@ function requireLabRoot(): string {
 /** Read-only campaign REST API (DESIGN §3/§5 — host FS is truth; never writes). */
 async function handleApi(url: URL): Promise<Response | undefined> {
 	if (url.pathname === "/api/health") {
-		return json({ ok: true, cwd: CWD, labRoot: LAB_ROOT || null });
+		return json({ ok: true, cwd: CWD, labRoot: LAB_ROOT || null, db: !!db });
+	}
+	if (url.pathname === "/api/cost") {
+		return json(db ? await costSummary(db) : { enabled: false });
+	}
+	if (url.pathname === "/api/cost/recent") {
+		return json(db ? await recentUsage(db, 50) : []);
+	}
+	if (url.pathname === "/api/projection/sync") {
+		if (!db) return json({ enabled: false });
+		return json(await syncCampaigns(db, requireLabRoot()));
 	}
 	if (url.pathname === "/api/campaigns") {
 		const scope = (url.searchParams.get("scope") as "active" | "archived" | "all") ?? "active";
@@ -72,8 +100,16 @@ function broadcast(frame: unknown): void {
 	for (const ws of sockets) ws.send(text);
 }
 
-// One shared adapter/session, created lazily on first client.
-const adapter = new OmpSessionAdapter(broadcast);
+// One shared adapter/session, created lazily on first client. When a DB is
+// configured, tap the raw event stream to append the cost ledger at message_end.
+const adapter = new OmpSessionAdapter(broadcast, {
+	onRawEvent: db
+		? ev => {
+				const row = usageFromEvent(ev, { cwd: CWD, campaignId: campaignIdFromCwd(CWD) });
+				if (row) recordUsage(db!, row).catch(() => {});
+			}
+		: undefined,
+});
 let startPromise: Promise<void> | undefined;
 function ensureStarted(): Promise<void> {
 	if (!startPromise) startPromise = adapter.start(CWD);
