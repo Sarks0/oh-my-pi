@@ -47,4 +47,15 @@ export interface CampaignDetail extends CampaignSummary {
 	findings: FindingSummary[];
 }
 
+export interface Programme {
+	name: string;
+	description?: string;
+	url?: string;
+	competition_level?: string;
+	payouts_min: Record<string, number>;
+	bug_classes: string[];
+	min_payout?: number;
+	max_payout?: number;
+}
+
 export type WsFrame = { type: string; [k: string]: unknown };
