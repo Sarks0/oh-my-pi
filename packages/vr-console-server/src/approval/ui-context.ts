@@ -13,6 +13,7 @@
  * reference (modes/rpc/rpc-mode.ts:1517), which stubs the same methods.
  */
 import type { ExtensionApprovalAnswer, ExtensionApprovalPrompt, ExtensionUIContext } from "@oh-my-pi/pi-coding-agent";
+import type { ApprovalAuditor } from "./audit";
 import type { Broadcast, PendingRegistry } from "./pending";
 
 /** Cap preview strings so a huge tool arg (file body, decompile) cannot bloat a frame.
@@ -38,21 +39,26 @@ export function normalizeApprovalAnswer(answer: unknown, prompt: ExtensionApprov
 	return "deny";
 }
 
-export function createConsoleUIContext(broadcast: Broadcast, pending: PendingRegistry): ExtensionUIContext {
+export function createConsoleUIContext(broadcast: Broadcast, pending: PendingRegistry, auditor?: ApprovalAuditor): ExtensionUIContext {
 	const ctx = {
 		timeoutStartsOnPresentation: false,
 		supportsEditor: false,
 
 		// ---- the real approval card ----
 		async approve(prompt: ExtensionApprovalPrompt): Promise<ExtensionApprovalAnswer> {
-			const answer = await pending.request("approval", {
+			const full = cap(prompt.full);
+			const compact = cap(prompt.compact, 400);
+			const { id, promise } = pending.requestWithId("approval", {
 				type: "approval_request",
-				full: cap(prompt.full),
-				compact: cap(prompt.compact, 400),
+				full,
+				compact,
 				session: prompt.session,
 				grants: prompt.grants,
 			});
-			return normalizeApprovalAnswer(answer, prompt);
+			auditor?.onRaise(id, { full, compact, sessionOffered: !!prompt.session, grants: prompt.grants });
+			const normalized = normalizeApprovalAnswer(await promise, prompt);
+			auditor?.onResolve(id, normalized);
+			return normalized;
 		},
 
 		// ---- operator-facing dialogs (ask_operator rides input) ----

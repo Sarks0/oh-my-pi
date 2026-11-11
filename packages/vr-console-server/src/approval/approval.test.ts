@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { PendingRegistry } from "./pending";
 import { createConsoleUIContext, normalizeApprovalAnswer } from "./ui-context";
 import { compileApprovalPolicy, PINNED_RULESET } from "./policy";
+import { classifyAnswer, type ApprovalAuditor } from "./audit";
 
 const PROMPT_PLAIN = { full: "run lab-mcp WinRM", compact: "lab winrm" };
 const PROMPT_SESSION = { ...PROMPT_PLAIN, session: "Approve for this session" };
@@ -55,6 +56,32 @@ describe("ConsoleUIContext.approve — pushes a card and resolves on reply", () 
 		const p = ctx.approve!(PROMPT_PLAIN as any);
 		pending.rejectAll("deny");
 		expect(await p).toBe("deny");
+	});
+});
+
+describe("approval audit wiring", () => {
+	test("classifyAnswer maps answers to audit status", () => {
+		expect(classifyAnswer("deny")).toEqual({ status: "denied", answer: "deny" });
+		expect(classifyAnswer("once")).toEqual({ status: "allowed", answer: "once" });
+		expect(classifyAnswer("session")).toEqual({ status: "allowed", answer: "session" });
+		expect(classifyAnswer({ grant: "folder", always: true })).toEqual({ status: "allowed", answer: "grant:folder:always" });
+	});
+	test("approve() calls onRaise then onResolve with the normalized answer", async () => {
+		const frames: any[] = [];
+		const pending = new PendingRegistry(f => frames.push(f));
+		const calls: Array<[string, string, unknown]> = [];
+		const auditor: ApprovalAuditor = {
+			onRaise: (id, info) => calls.push(["raise", id, info]),
+			onResolve: (id, answer) => calls.push(["resolve", id, answer]),
+		};
+		const ctx = createConsoleUIContext(f => frames.push(f), pending, auditor);
+		const p = ctx.approve!(PROMPT_PLAIN as any);
+		const card = frames.find(f => f.type === "approval_request");
+		expect(calls[0][0]).toBe("raise"); // raised before resolve
+		expect(calls[0][1]).toBe(card.id);
+		pending.resolve(card.id, "allow"); // garbage → fail-closed deny
+		await p;
+		expect(calls[1]).toEqual(["resolve", card.id, "deny"]);
 	});
 });
 

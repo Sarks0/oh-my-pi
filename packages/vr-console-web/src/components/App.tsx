@@ -3,6 +3,7 @@ import { api } from "../api";
 import { Dashboard } from "./Dashboard";
 import { CampaignView } from "./CampaignView";
 import { Programmes } from "./Programmes";
+import { ApprovalRecords } from "./ApprovalRecords";
 
 /** Minimal hash router: #/ , #/campaign/<id> */
 function useHashRoute(): string {
@@ -22,7 +23,7 @@ const NAV_FUNCTIONS = [
 	{ label: "Surface Graph", href: "#/", hint: "open a campaign" },
 	{ label: "HITL Session", href: "#/", hint: "open a campaign" },
 ];
-const NAV_SYSTEM = ["LLM", "Agent", "MCP", "Skills (vr-*)", "Vault", "Approval Records"];
+const NAV_SYSTEM = ["LLM", "Agent", "MCP", "Skills (vr-*)", "Vault"];
 
 export function App() {
 	const hash = useHashRoute();
@@ -47,13 +48,14 @@ export function App() {
 				{NAV_SYSTEM.map((n, i) => (
 					<span key={i} className="navitem" title="Phase 2+: not yet wired">{n}</span>
 				))}
+				<a className={`navitem${hash === "#/approvals" ? " active" : ""}`} href="#/approvals">Approval Records</a>
 				<a className={`navitem${hash === "#/programmes" ? " active" : ""}`} href="#/programmes">Scope + Programmes</a>
 				<div style={{ padding: "16px 8px", fontSize: 11, color: "var(--faint)" }} className="mono">
 					labRoot: {health?.labRoot ?? "(unset)"}
 				</div>
 			</nav>
 			<main className="main">
-				{hash === "#/programmes" ? <Programmes /> : campaignMatch ? <CampaignView id={decodeURIComponent(campaignMatch[1])} /> : <Dashboard />}
+				{hash === "#/programmes" ? <Programmes /> : hash === "#/approvals" ? <ApprovalRecords /> : campaignMatch ? <CampaignView id={decodeURIComponent(campaignMatch[1])} /> : <Dashboard />}
 			</main>
 		</div>
 	);

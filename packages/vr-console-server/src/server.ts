@@ -22,6 +22,7 @@ import { listProgrammes } from "./programmes/reader";
 import { type Db, makeDb, migrate } from "./db/client";
 import { syncCampaigns } from "./db/projection";
 import { costSummary, recentUsage, recordUsage, usageFromEvent } from "./cost/ledger";
+import { listApprovalRecords, makeDbAuditor } from "./approval/audit";
 
 const PORT = Number(process.env.PORT ?? 8800);
 const CWD = process.env.VR_CONSOLE_CWD ?? process.cwd();
@@ -78,6 +79,9 @@ async function handleApi(url: URL): Promise<Response | undefined> {
 	if (url.pathname === "/api/cost/recent") {
 		return json(db ? await recentUsage(db, 50) : []);
 	}
+	if (url.pathname === "/api/approvals") {
+		return json(db ? await listApprovalRecords(db, 100) : { enabled: false });
+	}
 	if (url.pathname === "/api/projection/sync") {
 		if (!db) return json({ enabled: false });
 		return json(await syncCampaigns(db, requireLabRoot()));
@@ -127,6 +131,7 @@ const adapter = new OmpSessionAdapter(broadcast, {
 				if (row) recordUsage(db!, row).catch(() => {});
 			}
 		: undefined,
+	approvalAuditor: db ? makeDbAuditor(db, { cwd: CWD, campaignId: campaignIdFromCwd(CWD) }) : undefined,
 });
 let startPromise: Promise<void> | undefined;
 function ensureStarted(): Promise<void> {
