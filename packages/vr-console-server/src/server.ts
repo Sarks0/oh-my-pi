@@ -18,6 +18,7 @@
 import { join } from "node:path";
 import { OmpSessionAdapter } from "./adapter/omp-session-adapter";
 import { getCampaign, getFinding, listCampaigns, resolveEvidenceFile } from "./campaign/reader";
+import { listProgrammes } from "./programmes/reader";
 import { type Db, makeDb, migrate } from "./db/client";
 import { syncCampaigns } from "./db/projection";
 import { costSummary, recentUsage, recordUsage, usageFromEvent } from "./cost/ledger";
@@ -84,6 +85,9 @@ async function handleApi(url: URL): Promise<Response | undefined> {
 	if (url.pathname === "/api/campaigns") {
 		const scope = (url.searchParams.get("scope") as "active" | "archived" | "all") ?? "active";
 		return json(await listCampaigns(requireLabRoot(), scope));
+	}
+	if (url.pathname === "/api/programmes") {
+		return json(await listProgrammes(requireLabRoot()));
 	}
 	// evidence file (read-only, path-guarded) — must precede the finding-detail route
 	const fileM = url.pathname.match(/^\/api\/campaigns\/([^/]+)\/findings\/([^/]+)\/file$/);
