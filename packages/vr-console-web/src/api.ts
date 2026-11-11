@@ -1,4 +1,4 @@
-import type { CampaignDetail, CampaignSummary, FindingDetail, WsFrame } from "./types";
+import type { CampaignDetail, CampaignSummary, FindingDetail, Programme, WsFrame } from "./types";
 
 async function getJson<T>(path: string): Promise<T> {
 	const r = await fetch(path);
@@ -15,6 +15,7 @@ export const api = {
 		getJson<FindingDetail>(`/api/campaigns/${encodeURIComponent(campaignId)}/findings/${encodeURIComponent(fid)}`),
 	evidenceUrl: (campaignId: string, fid: string, rel: string) =>
 		`/api/campaigns/${encodeURIComponent(campaignId)}/findings/${encodeURIComponent(fid)}/file?path=${encodeURIComponent(rel)}`,
+	programmes: () => getJson<Programme[]>("/api/programmes"),
 };
 
 export interface WsHandle {
