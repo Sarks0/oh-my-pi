@@ -7,6 +7,20 @@ async function getJson<T>(path: string): Promise<T> {
 	return body as T;
 }
 
+async function postJson<T>(path: string, body?: unknown): Promise<T> {
+	const r = await fetch(path, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: body !== undefined ? JSON.stringify(body) : undefined,
+	});
+	const d = await r.json().catch(() => ({}));
+	if (!r.ok) throw new Error((d as { error?: string }).error ?? `HTTP ${r.status}`);
+	return d as T;
+}
+
+interface RequestResult { requested: boolean; instruction: string }
+const enc = encodeURIComponent;
+
 export const api = {
 	health: () => getJson<{ ok: boolean; cwd: string; labRoot: string | null }>("/api/health"),
 	campaigns: (scope: "active" | "archived" | "all" = "all") => getJson<CampaignSummary[]>(`/api/campaigns?scope=${scope}`),
@@ -17,6 +31,10 @@ export const api = {
 		`/api/campaigns/${encodeURIComponent(campaignId)}/findings/${encodeURIComponent(fid)}/file?path=${encodeURIComponent(rel)}`,
 	programmes: () => getJson<Programme[]>("/api/programmes"),
 	approvals: () => getJson<ApprovalRecord[] | { enabled: false }>("/api/approvals"),
+	requestPromote: (campaignId: string, fid: string) =>
+		postJson<RequestResult>(`/api/campaigns/${enc(campaignId)}/findings/${enc(fid)}/request-promote`),
+	requestGateRecord: (campaignId: string, fid: string, gate: string, status: string) =>
+		postJson<RequestResult>(`/api/campaigns/${enc(campaignId)}/findings/${enc(fid)}/gates/${enc(gate)}/request-record`, { status }),
 };
 
 export interface WsHandle {

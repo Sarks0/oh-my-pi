@@ -16,6 +16,7 @@ const STATUS_CLASS: Record<GateStatus, string> = {
 	passed: "passed", failed: "failed", blocked: "blocked",
 	in_progress: "inprogress", not_applicable: "na", not_started: "",
 };
+const GATE_STATUSES: GateStatus[] = ["not_started", "in_progress", "passed", "failed", "blocked", "not_applicable"];
 const shortGate = (n: string) => n.replace(/^gate/, "g").replace(/_/g, " ");
 
 const TABS = ["Overview", "Findings + Gates", "Surfaces", "Session"] as const;
@@ -72,21 +73,46 @@ function EvidencePreview({ url, name }: { url: string; name: string }) {
 	);
 }
 
+function GateRequest({ onRequest }: { onRequest: (status: string) => void }) {
+	const [status, setStatus] = useState<string>("passed");
+	return (
+		<span style={{ display: "flex", gap: 6, alignItems: "center", justifyContent: "flex-end" }}>
+			<select
+				value={status}
+				onChange={e => setStatus(e.target.value)}
+				style={{ background: "var(--bg)", color: "var(--fg)", border: "1px solid var(--line)", borderRadius: 4, padding: "2px 4px", fontSize: 11 }}
+			>
+				{GATE_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+			</select>
+			<button style={{ fontSize: 11, padding: "3px 8px" }} onClick={() => onRequest(status)}>request record</button>
+		</span>
+	);
+}
+
 function FindingDetailPanel({ campaignId, fid, onClose }: { campaignId: string; fid: string; onClose: () => void }) {
 	const [f, setF] = useState<FindingDetail | null>(null);
 	const [err, setErr] = useState<string | null>(null);
 	const [open, setOpen] = useState<string | null>(null);
+	const [msg, setMsg] = useState<string | null>(null);
 	useEffect(() => {
-		setF(null); setErr(null); setOpen(null);
+		setF(null); setErr(null); setOpen(null); setMsg(null);
 		api.finding(campaignId, fid).then(setF).catch(e => setErr(String(e.message ?? e)));
 	}, [campaignId, fid]);
+
+	const doRequest = (p: Promise<{ instruction: string }>) =>
+		p.then(r => setMsg(`Requested — approve it in the Session tab. The agent will run the host tool (which raises an approval card). Instruction: "${r.instruction.slice(0, 140)}…"`))
+			.catch(e => setMsg(`Request failed: ${String(e.message ?? e)}`));
 
 	return (
 		<div className="detail">
 			<div className="pagehead" style={{ marginBottom: 10 }}>
 				<button onClick={onClose}>← findings</button>
 				<h1 style={{ fontSize: 15 }} className="mono">{fid}</h1>
+				{f?.state === "hallucination" && (
+					<button className="primary" style={{ marginLeft: "auto" }} onClick={() => doRequest(api.requestPromote(campaignId, fid))}>Request promote →</button>
+				)}
 			</div>
+			{msg && <div className="card" style={{ marginBottom: 10, borderLeft: "3px solid var(--accent)" }}><div className="meta">{msg}</div></div>}
 			{err && <div className="card err">{err}</div>}
 			{!err && !f && <div className="empty">loading…</div>}
 			{f && (
@@ -108,6 +134,7 @@ function FindingDetailPanel({ campaignId, fid, onClose }: { campaignId: string; 
 									<td><span className={`gate ${STATUS_CLASS[g.status]}`}>{g.status}</span></td>
 									<td className="meta">{g.required ? "required" : "optional"}</td>
 									<td className="meta">{g.evidence_count} file(s)</td>
+									<td><GateRequest onRequest={s => doRequest(api.requestGateRecord(campaignId, fid, g.name, s))} /></td>
 								</tr>
 							))}
 							{f.gates.length === 0 && <tr><td className="meta" colSpan={4}>no gates recorded yet (seeded not_started on the host)</td></tr>}

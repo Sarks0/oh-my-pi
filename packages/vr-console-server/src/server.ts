@@ -18,6 +18,7 @@
 import { join } from "node:path";
 import { OmpSessionAdapter } from "./adapter/omp-session-adapter";
 import { getCampaign, getFinding, listCampaigns, resolveEvidenceFile } from "./campaign/reader";
+import { composeGateRecordRequest, composePromoteRequest } from "./campaign/requests";
 import { listProgrammes } from "./programmes/reader";
 import { type Db, makeDb, migrate } from "./db/client";
 import { syncCampaigns } from "./db/projection";
@@ -139,6 +140,32 @@ function ensureStarted(): Promise<void> {
 	return startPromise;
 }
 
+/**
+ * Operator action REQUESTS (DESIGN §4.3): POST routes that compose an instruction and
+ * forward it to the agent as a session.prompt. They do NOT write campaign/gate state —
+ * the agent calls the host campaign-mcp tool, which is a mutation and raises an approval
+ * card first. The response echoes the composed instruction; the work streams to the WS.
+ */
+async function handleApiPost(url: URL, req: Request): Promise<Response | undefined> {
+	const promoteM = url.pathname.match(/^\/api\/campaigns\/([^/]+)\/findings\/([^/]+)\/request-promote$/);
+	if (promoteM) {
+		const instruction = composePromoteRequest(decodeURIComponent(promoteM[1]), decodeURIComponent(promoteM[2]));
+		await ensureStarted();
+		adapter.prompt(instruction).catch(() => {}); // fire; the turn (and its approval card) stream to the WS
+		return json({ requested: true, instruction });
+	}
+	const gateM = url.pathname.match(/^\/api\/campaigns\/([^/]+)\/findings\/([^/]+)\/gates\/([^/]+)\/request-record$/);
+	if (gateM) {
+		const body = (await req.json().catch(() => ({}))) as { status?: string };
+		const status = typeof body.status === "string" ? body.status : "passed";
+		const instruction = composeGateRecordRequest(decodeURIComponent(gateM[1]), decodeURIComponent(gateM[2]), decodeURIComponent(gateM[3]), status);
+		await ensureStarted();
+		adapter.prompt(instruction).catch(() => {});
+		return json({ requested: true, instruction });
+	}
+	return undefined;
+}
+
 const server = Bun.serve({
 	port: PORT,
 	async fetch(req, srv) {
@@ -149,6 +176,10 @@ const server = Bun.serve({
 		}
 		if (url.pathname.startsWith("/api/")) {
 			try {
+				if (req.method === "POST") {
+					const posted = await handleApiPost(url, req);
+					if (posted) return posted;
+				}
 				const res = await handleApi(url);
 				if (res) return res;
 			} catch (err) {
