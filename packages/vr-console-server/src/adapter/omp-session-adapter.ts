@@ -31,7 +31,11 @@ export class OmpSessionAdapter {
 	#mcpManager: any;
 	#unsub: (() => void) | undefined;
 
-	constructor(private broadcast: Broadcast) {
+	/** opts.onRawEvent taps the UNSHAPED event stream (e.g. for the cost ledger). */
+	constructor(
+		private broadcast: Broadcast,
+		private opts: { onRawEvent?: (ev: unknown) => void } = {},
+	) {
 		this.pending = new PendingRegistry(broadcast);
 	}
 
@@ -88,7 +92,14 @@ export class OmpSessionAdapter {
 		// (sdk.ts:959 "hasUI only enables tool dialogs"), so approve() fires.
 		res.setToolUIContext(createConsoleUIContext(this.broadcast, this.pending), true);
 
-		this.#unsub = this.#session.subscribe((ev: any) => this.broadcast(shapeEvent(ev)));
+		this.#unsub = this.#session.subscribe((ev: any) => {
+			this.broadcast(shapeEvent(ev));
+			try {
+				this.opts.onRawEvent?.(ev);
+			} catch {
+				/* a ledger write must never break the event stream */
+			}
+		});
 
 		if (this.#mcpManager) {
 			this.broadcast({ type: "notice", level: "info", message: "waiting for MCP servers…" });
