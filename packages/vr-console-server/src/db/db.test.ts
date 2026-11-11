@@ -24,7 +24,7 @@ suite("Postgres projection + cost ledger", () => {
 		await mkdir(join(camp, "findings", "finding-002_y", "evidence", "gate4_report_package"), { recursive: true });
 		await writeFile(join(camp, "campaign.yaml"), "platform: windows\nscope: db test\ntarget: t.sys\n");
 		await writeFile(join(camp, "hallucinations", "finding-001_x", "finding.yaml"), "surface_id: s1\nstate: hallucination\n");
-		await writeFile(join(camp, "findings", "finding-002_y", "finding.yaml"), "surface_id: s1\nstate: validated\n");
+		await writeFile(join(camp, "findings", "finding-002_y", "finding.yaml"), "surface_id: s1\nstate: validated\ngates:\n  gate4_report_package:\n    status: passed\n    required: true\n    evidence: []\n");
 	});
 
 	afterAll(async () => {
@@ -45,7 +45,8 @@ suite("Postgres projection + cost ledger", () => {
 
 		const fs = await sql`SELECT id, state, gates FROM findings_mirror ORDER BY id`;
 		expect(fs.map((r: any) => r.state)).toEqual(["hallucination", "validated"]);
-		expect(fs[1].gates).toEqual(["gate4_report_package"]); // jsonb round-trips the array
+		// jsonb round-trips the GateInfo[] from finding.yaml's gates dict
+		expect(fs[1].gates).toEqual([{ name: "gate4_report_package", status: "passed", required: true, evidence_count: 0 }]);
 	});
 
 	test("re-sync is idempotent and reflects host removals", async () => {

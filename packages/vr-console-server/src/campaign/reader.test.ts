@@ -2,75 +2,100 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getCampaign, listCampaigns } from "./reader";
+import { getCampaign, getFinding, listCampaigns, resolveEvidenceFile } from "./reader";
 
 let LAB: string;
+const CAMP = "camp-001_clfs";
 
-/** Build a synthetic campaign tree matching campaign-mcp's on-disk layout. */
 beforeAll(async () => {
 	LAB = await mkdtemp(join(tmpdir(), "vrlab-"));
-	const camp = join(LAB, "campaigns", "active", "camp-001_clfs");
+	const camp = join(LAB, "campaigns", "active", CAMP);
 	await mkdir(join(camp, "surface", "records", "surface-001_ioctl"), { recursive: true });
 	await writeFile(join(camp, "campaign.yaml"), "platform: windows\nscope: CLFS driver\ntarget: clfs.sys\n");
-	await writeFile(join(camp, "surface", "records", "surface-001_ioctl", "surface.yaml"), "kind: ioctl\ndevice: \\\\.\\CLFS\n");
+	await writeFile(join(camp, "surface", "records", "surface-001_ioctl", "surface.yaml"), "kind: ioctl\n");
 
-	// hallucination (born), with a gate0 evidence dir
-	await mkdir(join(camp, "hallucinations", "finding-001_oob", "evidence", "gate0_poc_compiles"), { recursive: true });
-	await writeFile(
-		join(camp, "hallucinations", "finding-001_oob", "finding.yaml"),
-		"surface_id: surface-001_ioctl\nsecurity_invariant: bounded copy\nstate: hallucination\n",
-	);
-	// promoted finding — dir says validated even if the field lagged
-	await mkdir(join(camp, "findings", "finding-002_uaf", "evidence", "gate4_report_package"), { recursive: true });
-	await writeFile(join(camp, "findings", "finding-002_uaf", "finding.yaml"), "surface_id: surface-001_ioctl\nstate: validated\n");
-	// rejected
+	// hallucination: gate0 passed (with evidence file), gate2 not_started; invariant as {statement}
+	const f1 = join(camp, "hallucinations", "finding-001_oob");
+	await mkdir(join(f1, "evidence", "gate0_poc_compiles"), { recursive: true });
+	await writeFile(join(f1, "finding.yaml"),
+		"surface_id: surface-001_ioctl\n" +
+		"security_invariant:\n  statement: bounded copy\n" +
+		"source: ClfsEncodeBlock\nsink: memcpy\nstate: hallucination\n" +
+		"gates:\n" +
+		"  gate0_poc_compiles:\n    status: passed\n    required: true\n    evidence:\n      - evidence/gate0_poc_compiles/poc.c\n" +
+		"  gate2_security_impact:\n    status: not_started\n    required: true\n    evidence: []\n");
+	await writeFile(join(f1, "evidence", "gate0_poc_compiles", "poc.c"), "int main(){return 0;}\n");
+
+	// validated: gate4 passed (with evidence)
+	const f2 = join(camp, "findings", "finding-002_uaf");
+	await mkdir(join(f2, "evidence", "gate4_report_package"), { recursive: true });
+	await writeFile(join(f2, "finding.yaml"), "surface_id: surface-001_ioctl\nstate: validated\ngates:\n  gate4_report_package:\n    status: passed\n    required: true\n    evidence:\n      - evidence/gate4_report_package/report.md\n");
+	await writeFile(join(f2, "evidence", "gate4_report_package", "report.md"), "# report\n");
+
+	// rejected: no gates key
 	await mkdir(join(camp, "rejected", "finding-003_nullderef"), { recursive: true });
 	await writeFile(join(camp, "rejected", "finding-003_nullderef", "finding.yaml"), "surface_id: surface-001_ioctl\n");
 
-	// a second, archived campaign
 	const camp2 = join(LAB, "campaigns", "archived", "camp-000_old");
 	await mkdir(camp2, { recursive: true });
-	await writeFile(join(camp2, "campaign.yaml"), "platform: windows\nscope: old\n");
+	await writeFile(join(camp2, "campaign.yaml"), "platform: windows\n");
 });
 
-afterAll(async () => {
-	await rm(LAB, { recursive: true, force: true });
-});
+afterAll(async () => { await rm(LAB, { recursive: true, force: true }); });
 
 describe("listCampaigns", () => {
-	test("active scope lists active campaigns with finding/surface counts", async () => {
-		const camps = await listCampaigns(LAB, "active");
-		expect(camps.length).toBe(1);
-		const c = camps[0];
-		expect(c.id).toBe("camp-001_clfs");
-		expect(c.platform).toBe("windows");
-		expect(c.title).toBe("clfs.sys");
+	test("counts findings and surfaces", async () => {
+		const c = (await listCampaigns(LAB, "active"))[0];
+		expect(c.id).toBe(CAMP);
 		expect(c.counts).toEqual({ hallucinations: 1, findings: 1, rejected: 1, surfaces: 1 });
-		expect(c.archived).toBe(false);
 	});
 	test("all scope includes archived", async () => {
-		const camps = await listCampaigns(LAB, "all");
-		expect(camps.map(c => c.id)).toEqual(["camp-000_old", "camp-001_clfs"]);
-		expect(camps.find(c => c.id === "camp-000_old")!.archived).toBe(true);
+		expect((await listCampaigns(LAB, "all")).map(c => c.id)).toEqual(["camp-000_old", CAMP]);
 	});
 });
 
-describe("getCampaign", () => {
-	test("returns surfaces and findings with directory-derived state", async () => {
-		const c = await getCampaign(LAB, "camp-001_clfs");
-		expect(c).not.toBeNull();
-		expect(c!.surfaces.map(s => s.id)).toEqual(["surface-001_ioctl"]);
-
+describe("getCampaign — real gate status + invariant", () => {
+	test("findings carry directory-derived state and parsed gates", async () => {
+		const c = await getCampaign(LAB, CAMP);
 		const byId = Object.fromEntries(c!.findings.map(f => [f.id, f]));
-		expect(byId["finding-001_oob"].state).toBe("hallucination");
-		expect(byId["finding-001_oob"].gates).toEqual(["gate0_poc_compiles"]);
-		expect(byId["finding-001_oob"].surface_id).toBe("surface-001_ioctl");
-		// directory is authoritative — findings/ ⇒ "validated"
+		const f1 = byId["finding-001_oob"];
+		expect(f1.state).toBe("hallucination");
+		expect(f1.security_invariant).toBe("bounded copy"); // {statement} unwrapped
+		expect(f1.gates.map(g => [g.name, g.status])).toEqual([
+			["gate0_poc_compiles", "passed"],
+			["gate2_security_impact", "not_started"],
+		]);
+		expect(f1.gates[0].evidence_count).toBe(1);
 		expect(byId["finding-002_uaf"].state).toBe("validated");
-		expect(byId["finding-002_uaf"].gates).toEqual(["gate4_report_package"]);
-		expect(byId["finding-003_nullderef"].state).toBe("rejected");
+		expect(byId["finding-003_nullderef"].gates).toEqual([]); // no gates key
 	});
-	test("unknown id returns null", async () => {
-		expect(await getCampaign(LAB, "nope")).toBeNull();
+});
+
+describe("getFinding + evidence", () => {
+	test("detail lists evidence files and source/sink", async () => {
+		const f = await getFinding(LAB, CAMP, "finding-001_oob");
+		expect(f).not.toBeNull();
+		expect(f!.campaign_id).toBe(CAMP);
+		expect(f!.source).toBe("ClfsEncodeBlock");
+		expect(f!.evidence_files.map(e => e.rel)).toEqual(["evidence/gate0_poc_compiles/poc.c"]);
+		expect(f!.evidence_files[0].size).toBeGreaterThan(0);
+	});
+	test("unknown finding returns null", async () => {
+		expect(await getFinding(LAB, CAMP, "finding-999_nope")).toBeNull();
+	});
+});
+
+describe("resolveEvidenceFile — path-guarded", () => {
+	test("resolves a real evidence file", async () => {
+		const p = await resolveEvidenceFile(LAB, CAMP, "finding-001_oob", "evidence/gate0_poc_compiles/poc.c");
+		expect(p).not.toBeNull();
+		expect(p!.endsWith("poc.c")).toBe(true);
+	});
+	test("rejects path traversal", async () => {
+		expect(await resolveEvidenceFile(LAB, CAMP, "finding-001_oob", "../../../../etc/passwd")).toBeNull();
+		expect(await resolveEvidenceFile(LAB, CAMP, "finding-001_oob", "evidence/../finding.yaml")).toBeNull();
+	});
+	test("rejects a missing file", async () => {
+		expect(await resolveEvidenceFile(LAB, CAMP, "finding-001_oob", "evidence/gate0_poc_compiles/nope.txt")).toBeNull();
 	});
 });

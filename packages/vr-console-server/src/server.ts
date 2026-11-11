@@ -17,7 +17,7 @@
  */
 import { join } from "node:path";
 import { OmpSessionAdapter } from "./adapter/omp-session-adapter";
-import { getCampaign, listCampaigns } from "./campaign/reader";
+import { getCampaign, getFinding, listCampaigns, resolveEvidenceFile } from "./campaign/reader";
 import { type Db, makeDb, migrate } from "./db/client";
 import { syncCampaigns } from "./db/projection";
 import { costSummary, recentUsage, recordUsage, usageFromEvent } from "./cost/ledger";
@@ -84,6 +84,20 @@ async function handleApi(url: URL): Promise<Response | undefined> {
 	if (url.pathname === "/api/campaigns") {
 		const scope = (url.searchParams.get("scope") as "active" | "archived" | "all") ?? "active";
 		return json(await listCampaigns(requireLabRoot(), scope));
+	}
+	// evidence file (read-only, path-guarded) — must precede the finding-detail route
+	const fileM = url.pathname.match(/^\/api\/campaigns\/([^/]+)\/findings\/([^/]+)\/file$/);
+	if (fileM) {
+		const abs = await resolveEvidenceFile(requireLabRoot(), decodeURIComponent(fileM[1]), decodeURIComponent(fileM[2]), url.searchParams.get("path") ?? "");
+		if (!abs) return json({ error: "evidence file not found" }, 404);
+		return new Response(Bun.file(abs)); // Bun infers content-type; text previews in the browser
+	}
+	// finding detail (gates + evidence listing)
+	const fdM = url.pathname.match(/^\/api\/campaigns\/([^/]+)\/findings\/([^/]+)$/);
+	if (fdM) {
+		const f = await getFinding(requireLabRoot(), decodeURIComponent(fdM[1]), decodeURIComponent(fdM[2]));
+		if (!f) return json({ error: "finding not found" }, 404);
+		return json(f);
 	}
 	const m = url.pathname.match(/^\/api\/campaigns\/([^/]+?)(\/findings)?$/);
 	if (m) {

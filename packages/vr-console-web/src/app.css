@@ -53,8 +53,19 @@ button.session { background: var(--amber); color: #140d00; font-weight: 600; }
 .finding { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
 .finding .fid { font-size: 13px; font-weight: 600; } .finding .inv { color: var(--muted); font-size: 12px; margin: 4px 0; }
 .gatechips { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 8px; }
-.gate { font-size: 10px; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--line); color: var(--faint); }
-.gate.on { color: var(--green); border-color: #1c3a26; background: #0f1b13; }
+.gate { font-size: 10px; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--line); color: var(--faint); white-space: nowrap; }
+.gate.passed { color: var(--green); border-color: #1c3a26; background: #0f1b13; }
+.gate.failed { color: var(--red); border-color: #3a1c1c; background: #1b0f0f; }
+.gate.blocked { color: var(--amber); border-color: #3a2f12; background: #1b150a; }
+.gate.inprogress { color: var(--accent); border-color: #16304a; background: #0c1620; }
+.gate.na { color: var(--faint); border-style: dashed; }
+.finding.click { cursor: pointer; } .finding.click:hover { border-color: #38435a; }
+.detail { max-width: 900px; }
+.gatetable { width: 100%; border-collapse: collapse; }
+.gatetable td { padding: 5px 8px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.evrow { border: 1px solid var(--line); border-radius: 6px; margin-bottom: 8px; }
+.evhead { display: flex; justify-content: space-between; padding: 8px 10px; cursor: pointer; }
+.evhead:hover { background: var(--panel2); }
 
 .split { display: grid; grid-template-rows: 1fr auto; height: calc(100vh - 160px); }
 .log { overflow-y: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; font-family: ui-monospace, monospace; font-size: 12.5px; white-space: pre-wrap; word-break: break-word; }
