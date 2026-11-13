@@ -70,4 +70,23 @@ export interface ApprovalRecord {
 	decided_at?: string | null;
 }
 
+export type GraphNodeKind = "binary" | "surface" | "finding" | "function" | "sink";
+export interface GraphNode {
+	id: string;
+	kind: GraphNodeKind;
+	label: string;
+	sub?: string;
+	status?: string;
+	coverage?: { reviewed: number; total: number; in_scope?: number };
+}
+export interface GraphEdge {
+	from: string;
+	to: string;
+	kind: "cites" | "contains" | "calls";
+}
+export interface CoverageGraph {
+	nodes: GraphNode[];
+	edges: GraphEdge[];
+}
+
 export type WsFrame = { type: string; [k: string]: unknown };

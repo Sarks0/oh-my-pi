@@ -1,4 +1,4 @@
-import type { ApprovalRecord, CampaignDetail, CampaignSummary, FindingDetail, Programme, WsFrame } from "./types";
+import type { ApprovalRecord, CampaignDetail, CampaignSummary, CoverageGraph, FindingDetail, Programme, WsFrame } from "./types";
 
 async function getJson<T>(path: string): Promise<T> {
 	const r = await fetch(path);
@@ -25,6 +25,7 @@ export const api = {
 	health: () => getJson<{ ok: boolean; cwd: string; labRoot: string | null }>("/api/health"),
 	campaigns: (scope: "active" | "archived" | "all" = "all") => getJson<CampaignSummary[]>(`/api/campaigns?scope=${scope}`),
 	campaign: (id: string) => getJson<CampaignDetail>(`/api/campaigns/${encodeURIComponent(id)}`),
+	graph: (id: string) => getJson<CoverageGraph>(`/api/campaigns/${encodeURIComponent(id)}/graph`),
 	finding: (campaignId: string, fid: string) =>
 		getJson<FindingDetail>(`/api/campaigns/${encodeURIComponent(campaignId)}/findings/${encodeURIComponent(fid)}`),
 	evidenceUrl: (campaignId: string, fid: string, rel: string) =>

@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getCampaign, getFinding, listCampaigns, resolveEvidenceFile } from "./reader";
+import { buildCoverageGraph, getCampaign, getFinding, listCampaigns, resolveEvidenceFile } from "./reader";
 
 let LAB: string;
 const CAMP = "camp-001_clfs";
@@ -12,7 +12,10 @@ beforeAll(async () => {
 	const camp = join(LAB, "campaigns", "active", CAMP);
 	await mkdir(join(camp, "surface", "records", "surface-001_ioctl"), { recursive: true });
 	await writeFile(join(camp, "campaign.yaml"), "platform: windows\nscope: CLFS driver\ntarget: clfs.sys\n");
-	await writeFile(join(camp, "surface", "records", "surface-001_ioctl", "surface.yaml"), "kind: ioctl\n");
+	await writeFile(join(camp, "surface", "records", "surface-001_ioctl", "surface.yaml"), "kind: ioctl\nmodule: clfs.sys\n");
+	// coverage ledger for the clfs.sys binary (notes-mcp shape)
+	await mkdir(join(camp, "coverage"), { recursive: true });
+	await writeFile(join(camp, "coverage", "abc123.yaml"), "binary_id: abc123\nmodule_name: clfs.sys\ntotal: 100\nin_scope_total: 80\nreviewed: 40\nstatus: ready\n");
 
 	// hallucination: gate0 passed (with evidence file), gate2 not_started; invariant as {statement}
 	const f1 = join(camp, "hallucinations", "finding-001_oob");
@@ -82,6 +85,29 @@ describe("getFinding + evidence", () => {
 	});
 	test("unknown finding returns null", async () => {
 		expect(await getFinding(LAB, CAMP, "finding-999_nope")).toBeNull();
+	});
+});
+
+describe("buildCoverageGraph", () => {
+	test("assembles binary ← surface ← finding with coverage + edges", async () => {
+		const g = await buildCoverageGraph(LAB, CAMP);
+		const byId = Object.fromEntries(g.nodes.map(n => [n.id, n]));
+
+		// binary node carries coverage
+		expect(byId["bin:abc123"].kind).toBe("binary");
+		expect(byId["bin:abc123"].label).toBe("clfs.sys");
+		expect(byId["bin:abc123"].coverage).toEqual({ reviewed: 40, total: 100, in_scope: 80 });
+
+		// surface node + surface→binary edge (module match)
+		expect(byId["surf:surface-001_ioctl"].kind).toBe("surface");
+		expect(g.edges).toContainEqual({ from: "surf:surface-001_ioctl", to: "bin:abc123", kind: "contains" });
+
+		// finding nodes carry state + cite their surface
+		expect(byId["find:finding-001_oob"].status).toBe("hallucination");
+		expect(g.edges).toContainEqual({ from: "find:finding-001_oob", to: "surf:surface-001_ioctl", kind: "cites" });
+	});
+	test("unknown campaign → empty graph (no throw)", async () => {
+		expect(await buildCoverageGraph(LAB, "nope")).toEqual({ nodes: [], edges: [] });
 	});
 });
 

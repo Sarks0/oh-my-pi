@@ -73,3 +73,38 @@ export interface CampaignDetail extends CampaignSummary {
 	surfaces: SurfaceSummary[];
 	findings: FindingSummary[];
 }
+
+/** Per-binary coverage ledger record (notes-mcp coverage schema; see coverage.py). */
+export interface BinaryCoverage {
+	sha: string;
+	module_name?: string;
+	total?: number;
+	in_scope_total?: number;
+	reviewed?: number;
+	reviewed_in_scope?: number;
+	status?: string; // "ready" | "not_indexed" | …
+}
+
+/**
+ * Surface/coverage graph (DESIGN §4.3). Shell model: binary ← surface ← finding.
+ * The binary-mcp enrichment layer adds `function`/`sink` nodes between binary and
+ * surface (call-path edges) once live Ghidra data is available on the host.
+ */
+export type GraphNodeKind = "binary" | "surface" | "finding" | "function" | "sink";
+export interface GraphNode {
+	id: string;
+	kind: GraphNodeKind;
+	label: string;
+	sub?: string;
+	status?: string; // finding state, or binary index status
+	coverage?: { reviewed: number; total: number; in_scope?: number };
+}
+export interface GraphEdge {
+	from: string;
+	to: string;
+	kind: "cites" | "contains" | "calls";
+}
+export interface CoverageGraph {
+	nodes: GraphNode[];
+	edges: GraphEdge[];
+}
