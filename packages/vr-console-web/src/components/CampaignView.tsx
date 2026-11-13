@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { CampaignDetail, FindingDetail, FindingSummary, GateInfo, GateStatus } from "../types";
 import { SessionPanel } from "./SessionPanel";
+import { CoverageGraph } from "./CoverageGraph";
 
 // Windows-profile required gates (vr-lab/docs/validation-gates.md); gate2b is windows-only.
 const WINDOWS_GATES = [
@@ -19,7 +20,7 @@ const STATUS_CLASS: Record<GateStatus, string> = {
 const GATE_STATUSES: GateStatus[] = ["not_started", "in_progress", "passed", "failed", "blocked", "not_applicable"];
 const shortGate = (n: string) => n.replace(/^gate/, "g").replace(/_/g, " ");
 
-const TABS = ["Overview", "Findings + Gates", "Surfaces", "Session"] as const;
+const TABS = ["Overview", "Findings + Gates", "Surface Graph", "Surfaces", "Session"] as const;
 type Tab = (typeof TABS)[number];
 
 function GateChips({ gates }: { gates: GateInfo[] }) {
@@ -236,6 +237,7 @@ export function CampaignView({ id }: { id: string }) {
 			{tab === "Findings + Gates" && (selected
 				? <FindingDetailPanel campaignId={camp.id} fid={selected} onClose={() => setSelected(null)} />
 				: <FindingsBoard findings={camp.findings} onOpen={setSelected} />)}
+			{tab === "Surface Graph" && <CoverageGraph campaignId={camp.id} />}
 			{tab === "Surfaces" && (
 				<div className="grid">
 					{camp.surfaces.length === 0 && <div className="empty">no surface records</div>}
