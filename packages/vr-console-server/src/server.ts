@@ -17,7 +17,7 @@
  */
 import { join } from "node:path";
 import { OmpSessionAdapter } from "./adapter/omp-session-adapter";
-import { getCampaign, getFinding, listCampaigns, resolveEvidenceFile } from "./campaign/reader";
+import { buildCoverageGraph, getCampaign, getFinding, listCampaigns, resolveEvidenceFile } from "./campaign/reader";
 import { composeGateRecordRequest, composePromoteRequest } from "./campaign/requests";
 import { listProgrammes } from "./programmes/reader";
 import { type Db, makeDb, migrate } from "./db/client";
@@ -93,6 +93,11 @@ async function handleApi(url: URL): Promise<Response | undefined> {
 	}
 	if (url.pathname === "/api/programmes") {
 		return json(await listProgrammes(requireLabRoot()));
+	}
+	// coverage/surface graph
+	const graphM = url.pathname.match(/^\/api\/campaigns\/([^/]+)\/graph$/);
+	if (graphM) {
+		return json(await buildCoverageGraph(requireLabRoot(), decodeURIComponent(graphM[1])));
 	}
 	// evidence file (read-only, path-guarded) — must precede the finding-detail route
 	const fileM = url.pathname.match(/^\/api\/campaigns\/([^/]+)\/findings\/([^/]+)\/file$/);

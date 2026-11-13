@@ -11,14 +11,18 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, normalize } from "node:path";
 import type {
+	BinaryCoverage,
 	CampaignDetail,
 	CampaignSummary,
+	CoverageGraph,
 	EvidenceFile,
 	FindingDetail,
 	FindingState,
 	FindingSummary,
 	GateInfo,
 	GateStatus,
+	GraphEdge,
+	GraphNode,
 	SurfaceSummary,
 } from "./types";
 
@@ -233,12 +237,88 @@ export async function resolveEvidenceFile(labRoot: string, campaignId: string, f
 	return s.isFile() ? abs : null;
 }
 
-export async function getCampaign(labRoot: string, id: string): Promise<CampaignDetail | null> {
+async function findCampaignDir(labRoot: string, id: string): Promise<string | null> {
 	for (const sc of ["active", "archived"] as const) {
 		const campDir = join(labRoot, "campaigns", sc, id);
-		if (!(await pathExists(campDir))) continue;
-		const summary = await summarize(campDir, id, sc === "archived");
-		return { ...summary, surfaces: await readSurfaces(campDir), findings: await readFindings(campDir) };
+		if (await pathExists(campDir)) return campDir;
 	}
 	return null;
+}
+
+export async function getCampaign(labRoot: string, id: string): Promise<CampaignDetail | null> {
+	const campDir = await findCampaignDir(labRoot, id);
+	if (!campDir) return null;
+	const summary = await summarize(campDir, id, campDir.includes("/archived/"));
+	return { ...summary, surfaces: await readSurfaces(campDir), findings: await readFindings(campDir) };
+}
+
+function num(v: unknown): number | undefined {
+	return typeof v === "number" ? v : undefined;
+}
+
+/** Per-binary coverage records from the campaign's coverage/*.{yaml,json} (notes-mcp ledger shape). */
+export async function readBinaryCoverage(labRoot: string, campaignId: string): Promise<BinaryCoverage[]> {
+	const campDir = await findCampaignDir(labRoot, campaignId);
+	if (!campDir) return [];
+	const covDir = join(campDir, "coverage");
+	let names: string[] = [];
+	try {
+		names = (await readdir(covDir)).filter(n => /\.(ya?ml|json)$/i.test(n));
+	} catch {
+		return [];
+	}
+	const out: BinaryCoverage[] = [];
+	for (const n of names.sort()) {
+		const raw = await readYaml(join(covDir, n)); // Bun.YAML parses JSON too
+		out.push({
+			sha: str(raw.binary_id) ?? str(raw.sha) ?? n.replace(/\.(ya?ml|json)$/i, ""),
+			module_name: str(raw.module_name),
+			total: num(raw.total),
+			in_scope_total: num(raw.in_scope_total),
+			reviewed: num(raw.reviewed),
+			reviewed_in_scope: num(raw.reviewed_in_scope),
+			status: str(raw.status),
+		});
+	}
+	return out;
+}
+
+/**
+ * Assemble the surface/coverage graph (DESIGN §4.3): binary ← surface ← finding.
+ * Binary nodes carry coverage (reviewed/total). A surface links to a binary when its
+ * surface.yaml names a module/binary matching a coverage record. Function/sink nodes
+ * (the binary-mcp enrichment layer) are not populated from on-disk data yet.
+ */
+export async function buildCoverageGraph(labRoot: string, campaignId: string): Promise<CoverageGraph> {
+	const nodes: GraphNode[] = [];
+	const edges: GraphEdge[] = [];
+	const coverage = await readBinaryCoverage(labRoot, campaignId);
+	const moduleToBin = new Map<string, string>();
+	for (const b of coverage) {
+		const id = `bin:${b.sha}`;
+		nodes.push({
+			id,
+			kind: "binary",
+			label: b.module_name ?? b.sha.slice(0, 12),
+			sub: b.status,
+			coverage: b.total != null ? { reviewed: b.reviewed ?? 0, total: b.total, in_scope: b.in_scope_total } : undefined,
+		});
+		if (b.module_name) moduleToBin.set(b.module_name.toLowerCase(), id);
+	}
+
+	const detail = await getCampaign(labRoot, campaignId);
+	if (!detail) return { nodes, edges };
+
+	const surfaceIds = new Set(detail.surfaces.map(s => s.id));
+	for (const s of detail.surfaces) {
+		nodes.push({ id: `surf:${s.id}`, kind: "surface", label: s.id, sub: str(s.raw.kind) });
+		const mod = (str(s.raw.module) ?? str(s.raw.binary) ?? str(s.raw.image))?.toLowerCase();
+		const binId = mod ? moduleToBin.get(mod) : undefined;
+		if (binId) edges.push({ from: `surf:${s.id}`, to: binId, kind: "contains" });
+	}
+	for (const f of detail.findings) {
+		nodes.push({ id: `find:${f.id}`, kind: "finding", label: f.id, status: f.state });
+		if (f.surface_id && surfaceIds.has(f.surface_id)) edges.push({ from: `find:${f.id}`, to: `surf:${f.surface_id}`, kind: "cites" });
+	}
+	return { nodes, edges };
 }
