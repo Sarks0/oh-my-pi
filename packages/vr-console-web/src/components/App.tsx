@@ -5,6 +5,9 @@ import { CampaignView } from "./CampaignView";
 import { Programmes } from "./Programmes";
 import { ApprovalRecords } from "./ApprovalRecords";
 import { SessionPanel } from "./SessionPanel";
+import { Agent } from "./Agent";
+import { Mcp } from "./Mcp";
+import { Skills } from "./Skills";
 
 function SessionPage() {
 	return (
@@ -36,7 +39,13 @@ const NAV_FUNCTIONS = [
 	{ label: "Surface Graph", href: "#/", hint: "open a campaign" },
 	{ label: "HITL Session", href: "#/session" },
 ];
-const NAV_SYSTEM = ["LLM", "Agent", "MCP", "Skills (vr-*)", "Vault"];
+const NAV_SYSTEM: { label: string; href?: string }[] = [
+	{ label: "LLM" },
+	{ label: "Agent", href: "#/agent" },
+	{ label: "MCP", href: "#/mcp" },
+	{ label: "Skills", href: "#/skills" },
+	{ label: "Vault" },
+];
 
 export function App() {
 	const hash = useHashRoute();
@@ -61,9 +70,13 @@ export function App() {
 					);
 				})}
 				<div className="navgroup">System</div>
-				{NAV_SYSTEM.map((n, i) => (
-					<span key={i} className="navitem" title="Phase 2+: not yet wired">{n}</span>
-				))}
+				{NAV_SYSTEM.map((n, i) =>
+					n.href ? (
+						<a key={i} className={`navitem${hash === n.href ? " active" : ""}`} href={n.href}>{n.label}</a>
+					) : (
+						<span key={i} className="navitem" title="Phase B2: not yet wired">{n.label}</span>
+					),
+				)}
 				<a className={`navitem${hash === "#/approvals" ? " active" : ""}`} href="#/approvals">Approval Records</a>
 				<a className={`navitem${hash === "#/programmes" ? " active" : ""}`} href="#/programmes">Scope + Programmes</a>
 				<div style={{ padding: "16px 8px", fontSize: 11, color: "var(--faint)" }} className="mono">
@@ -71,7 +84,7 @@ export function App() {
 				</div>
 			</nav>
 			<main className="main">
-				{hash === "#/programmes" ? <Programmes /> : hash === "#/approvals" ? <ApprovalRecords /> : hash === "#/session" ? <SessionPage /> : campaignMatch ? <CampaignView id={decodeURIComponent(campaignMatch[1])} /> : <Dashboard />}
+				{hash === "#/programmes" ? <Programmes /> : hash === "#/approvals" ? <ApprovalRecords /> : hash === "#/session" ? <SessionPage /> : hash === "#/agent" ? <Agent /> : hash === "#/mcp" ? <Mcp /> : hash === "#/skills" ? <Skills /> : campaignMatch ? <CampaignView id={decodeURIComponent(campaignMatch[1])} /> : <Dashboard />}
 			</main>
 		</div>
 	);

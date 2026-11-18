@@ -16,6 +16,7 @@
  * Env:  PORT (8800)   VR_CONSOLE_CWD (session cwd; a vr-lab campaign dir on the host)
  */
 import { join } from "node:path";
+import { discoverSkills } from "@oh-my-pi/pi-coding-agent";
 import { OmpSessionAdapter } from "./adapter/omp-session-adapter";
 import { buildCoverageGraph, getCampaign, getFinding, listCampaigns, resolveEvidenceFile } from "./campaign/reader";
 import { composeGateRecordRequest, composePromoteRequest } from "./campaign/requests";
@@ -73,6 +74,24 @@ function requireLabRoot(): string {
 async function handleApi(url: URL): Promise<Response | undefined> {
 	if (url.pathname === "/api/health") {
 		return json({ ok: true, cwd: CWD, labRoot: LAB_ROOT || null, db: !!db });
+	}
+	// --- omp operational panels (general cockpit, not VR-specific) ---
+	// Each forces the single session to start so the panel shows live omp state.
+	if (url.pathname === "/api/session") {
+		await ensureStarted();
+		return json(adapter.sessionInfo());
+	}
+	if (url.pathname === "/api/mcp") {
+		await ensureStarted();
+		return json(adapter.mcpInfo());
+	}
+	if (url.pathname === "/api/skills") {
+		// discoverSkills is a pure FS/settings read — no running session needed.
+		const { skills, warnings } = await discoverSkills(CWD);
+		return json({
+			skills: skills.map((s: { name: string; description?: string }) => ({ name: s.name, description: s.description ?? "" })),
+			warnings: Array.isArray(warnings) ? warnings.map((w: unknown) => String((w as { message?: string })?.message ?? w)) : [],
+		});
 	}
 	if (url.pathname === "/api/cost") {
 		return json(db ? await costSummary(db) : { enabled: false });

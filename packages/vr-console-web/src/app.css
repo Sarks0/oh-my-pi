@@ -59,6 +59,7 @@ button.session { background: var(--amber); color: #140d00; font-weight: 600; }
 .gate.blocked { color: var(--amber); border-color: #3a2f12; background: #1b150a; }
 .gate.inprogress { color: var(--accent); border-color: #16304a; background: #0c1620; }
 .gate.na { color: var(--faint); border-style: dashed; }
+.chip { font-size: 11px; padding: 3px 7px; border-radius: 4px; border: 1px solid var(--line); background: var(--panel, #0c1620); color: var(--muted); white-space: nowrap; }
 .finding.click { cursor: pointer; } .finding.click:hover { border-color: #38435a; }
 .detail { max-width: 900px; }
 .gatetable { width: 100%; border-collapse: collapse; }
