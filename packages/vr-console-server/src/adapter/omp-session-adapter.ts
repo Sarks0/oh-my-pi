@@ -30,6 +30,10 @@ export class OmpSessionAdapter {
 	#session: any;
 	#mcpManager: any;
 	#unsub: (() => void) | undefined;
+	#cwd: string | undefined;
+	#lastModel: string | undefined;
+	#lastProvider: string | undefined;
+	#lastApi: string | undefined;
 
 	/** opts.onRawEvent taps the UNSHAPED event stream (e.g. for the cost ledger);
 	 *  opts.approvalAuditor records approve/deny decisions. */
@@ -41,6 +45,7 @@ export class OmpSessionAdapter {
 	}
 
 	async start(cwd: string): Promise<void> {
+		this.#cwd = cwd;
 		this.broadcast({ type: "notice", level: "info", message: `creating agent session (cwd=${cwd})` });
 
 		// Pre-discover MCP so the per-tool policy can be keyed by the LIVE minted names
@@ -95,6 +100,18 @@ export class OmpSessionAdapter {
 
 		this.#unsub = this.#session.subscribe((ev: any) => {
 			this.broadcast(shapeEvent(ev));
+			// Capture the live model/provider off assistant turns — omp has no simple
+			// public model getter on AgentSession (#modelRegistry/#models are private),
+			// so the event stream is the grounded source for the Agent panel.
+			try {
+				if (ev?.type === "message_end" && ev.message?.role === "assistant") {
+					if (ev.message.model) this.#lastModel = String(ev.message.model);
+					if (ev.message.provider) this.#lastProvider = String(ev.message.provider);
+					if (ev.message.api) this.#lastApi = String(ev.message.api);
+				}
+			} catch {
+				/* model capture is best-effort */
+			}
 			try {
 				this.opts.onRawEvent?.(ev);
 			} catch {
@@ -122,6 +139,50 @@ export class OmpSessionAdapter {
 	/** Route a browser reply to the matching pending UI request. */
 	resolveReply(id: string, value: unknown): boolean {
 		return this.pending.resolve(id, value);
+	}
+
+	/** True once start() has created the in-process session. */
+	get started(): boolean {
+		return !!this.#session;
+	}
+
+	/** Live MCP view for the operational panel: connected servers + minted tools.
+	 *  `connectedServers` is the manager property (manager.ts:245); if absent we
+	 *  derive it from the unique serverNames on the tools. */
+	mcpInfo(): { started: boolean; connectedServers: string[]; tools: Array<{ name: string; server: string | undefined }> } {
+		const mgr = this.#mcpManager;
+		const rawTools: any[] = mgr?.getTools ? mgr.getTools() : [];
+		const tools = rawTools.map((t: any) => ({ name: t.name as string, server: t?.details?.serverName as string | undefined }));
+		let connectedServers: string[] = Array.isArray(mgr?.connectedServers) ? mgr.connectedServers : [];
+		if (connectedServers.length === 0) {
+			connectedServers = [...new Set(tools.map((t) => t.server).filter((s): s is string => !!s))];
+		}
+		return { started: this.started, connectedServers, tools };
+	}
+
+	/** Session summary for the Agent panel. approvalMode is the pinned posture
+	 *  (always-ask); model/provider are captured from the event stream. */
+	sessionInfo(): {
+		started: boolean;
+		cwd: string | undefined;
+		approvalMode: string;
+		model: string | null;
+		provider: string | null;
+		api: string | null;
+		mcp: { servers: number; tools: number };
+	} {
+		const mgr = this.#mcpManager;
+		const toolCount = mgr?.getTools ? mgr.getTools().length : 0;
+		const serverCount = Array.isArray(mgr?.connectedServers) ? mgr.connectedServers.length : this.mcpInfo().connectedServers.length;
+		return {
+			started: this.started,
+			cwd: this.#cwd,
+			approvalMode: "always-ask",
+			model: this.#lastModel ?? null,
+			provider: this.#lastProvider ?? null,
+			api: this.#lastApi ?? null,
+			mcp: { servers: serverCount, tools: toolCount },
+		};
 	}
 
 	async dispose(): Promise<void> {
