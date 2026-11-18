@@ -1,4 +1,4 @@
-import type { ApprovalRecord, CampaignDetail, CampaignSummary, CoverageGraph, FindingDetail, Programme, WsFrame } from "./types";
+import type { ApprovalRecord, CampaignDetail, CampaignSummary, CoverageGraph, FindingDetail, McpInfo, Programme, SessionInfo, SkillsInfo, WsFrame } from "./types";
 
 async function getJson<T>(path: string): Promise<T> {
 	const r = await fetch(path);
@@ -36,6 +36,10 @@ export const api = {
 		postJson<RequestResult>(`/api/campaigns/${enc(campaignId)}/findings/${enc(fid)}/request-promote`),
 	requestGateRecord: (campaignId: string, fid: string, gate: string, status: string) =>
 		postJson<RequestResult>(`/api/campaigns/${enc(campaignId)}/findings/${enc(fid)}/gates/${enc(gate)}/request-record`, { status }),
+	// omp operational panels
+	session: () => getJson<SessionInfo>("/api/session"),
+	mcp: () => getJson<McpInfo>("/api/mcp"),
+	skills: () => getJson<SkillsInfo>("/api/skills"),
 };
 
 export interface WsHandle {

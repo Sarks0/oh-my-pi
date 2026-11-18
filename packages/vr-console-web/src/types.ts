@@ -90,3 +90,31 @@ export interface CoverageGraph {
 }
 
 export type WsFrame = { type: string; [k: string]: unknown };
+
+// --- omp operational panels (general cockpit) ---
+export interface SessionInfo {
+	started: boolean;
+	cwd: string | null;
+	approvalMode: string;
+	model: string | null;
+	provider: string | null;
+	api: string | null;
+	mcp: { servers: number; tools: number };
+}
+export interface McpTool {
+	name: string;
+	server?: string;
+}
+export interface McpInfo {
+	started: boolean;
+	connectedServers: string[];
+	tools: McpTool[];
+}
+export interface SkillInfo {
+	name: string;
+	description: string;
+}
+export interface SkillsInfo {
+	skills: SkillInfo[];
+	warnings: string[];
+}
