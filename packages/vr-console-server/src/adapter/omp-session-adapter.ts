@@ -25,6 +25,15 @@ import { shapeEvent } from "../event-shape";
 
 const MCP_STARTUP_TIMEOUT_MS = 30_000;
 
+/** Flat, transport-safe view of an omp Model for the LLM panel. */
+export interface ModelDTO {
+	id: string;
+	name: string;
+	provider: string;
+	api: string | null;
+	contextWindow: number | null;
+}
+
 export class OmpSessionAdapter {
 	readonly pending: PendingRegistry;
 	#session: any;
@@ -160,8 +169,18 @@ export class OmpSessionAdapter {
 		return { started: this.started, connectedServers, tools };
 	}
 
+	/** The session's current model as a flat DTO. Reads the live `session.model`
+	 *  getter first (populated at session init / after a switch), falling back to
+	 *  what the event stream captured if the getter is not yet populated. */
+	#currentModel(): ModelDTO | null {
+		const m = this.#session?.model;
+		if (m) return { id: m.id, name: m.name ?? m.id, provider: m.provider, api: m.api ?? null, contextWindow: m.contextWindow ?? null };
+		if (this.#lastModel) return { id: this.#lastModel, name: this.#lastModel, provider: this.#lastProvider ?? "", api: this.#lastApi ?? null, contextWindow: null };
+		return null;
+	}
+
 	/** Session summary for the Agent panel. approvalMode is the pinned posture
-	 *  (always-ask); model/provider are captured from the event stream. */
+	 *  (always-ask); model/provider come from the live session, else the stream. */
 	sessionInfo(): {
 		started: boolean;
 		cwd: string | undefined;
@@ -174,15 +193,49 @@ export class OmpSessionAdapter {
 		const mgr = this.#mcpManager;
 		const toolCount = mgr?.getTools ? mgr.getTools().length : 0;
 		const serverCount = Array.isArray(mgr?.connectedServers) ? mgr.connectedServers.length : this.mcpInfo().connectedServers.length;
+		const cur = this.#currentModel();
 		return {
 			started: this.started,
 			cwd: this.#cwd,
 			approvalMode: "always-ask",
-			model: this.#lastModel ?? null,
-			provider: this.#lastProvider ?? null,
-			api: this.#lastApi ?? null,
+			model: cur?.id ?? null,
+			provider: cur?.provider ?? null,
+			api: cur?.api ?? null,
 			mcp: { servers: serverCount, tools: toolCount },
 		};
+	}
+
+	/** The model picker: the current model + every auth-configured chat model omp
+	 *  can switch to (modelRegistry.getAvailable — only providers with credentials). */
+	listModels(): { started: boolean; current: ModelDTO | null; models: Array<ModelDTO & { current: boolean }> } {
+		const cur = this.#session?.model;
+		const avail: any[] = this.#session?.modelRegistry?.getAvailable ? this.#session.modelRegistry.getAvailable() : [];
+		const models = avail.map((m: any) => ({
+			id: m.id,
+			name: m.name ?? m.id,
+			provider: m.provider,
+			api: m.api ?? null,
+			contextWindow: m.contextWindow ?? null,
+			current: !!cur && cur.provider === m.provider && cur.id === m.id,
+		}));
+		return { started: this.started, current: this.#currentModel(), models };
+	}
+
+	/** Switch the session's model. Resolves against the live available set by exact
+	 *  provider+id (the DTOs the picker handed the browser), then calls the public
+	 *  session.setModel. An operator control on their own session — not an agent
+	 *  tool call — so it does not pass through the approval gate; it logs a notice. */
+	async setModelByRef(provider: string, id: string): Promise<{ switched: boolean; current: ModelDTO | null; error?: string }> {
+		if (!this.#session) return { switched: false, current: null, error: "session not started" };
+		const avail: any[] = this.#session.modelRegistry?.getAvailable ? this.#session.modelRegistry.getAvailable() : [];
+		const found = avail.find((m: any) => m.provider === provider && m.id === id);
+		if (!found) return { switched: false, current: this.#currentModel(), error: `model ${provider}/${id} is not available` };
+		const res = await this.#session.setModel(found);
+		this.#lastModel = found.id;
+		this.#lastProvider = found.provider;
+		this.#lastApi = found.api ?? undefined;
+		this.broadcast({ type: "notice", level: "info", message: `model → ${found.provider}/${found.id}` });
+		return { switched: !!res?.switched, current: this.#currentModel() };
 	}
 
 	async dispose(): Promise<void> {
