@@ -85,6 +85,10 @@ async function handleApi(url: URL): Promise<Response | undefined> {
 		await ensureStarted();
 		return json(adapter.mcpInfo());
 	}
+	if (url.pathname === "/api/models") {
+		await ensureStarted();
+		return json(adapter.listModels());
+	}
 	if (url.pathname === "/api/skills") {
 		// discoverSkills is a pure FS/settings read — no running session needed.
 		const { skills, warnings } = await discoverSkills(CWD);
@@ -171,6 +175,14 @@ function ensureStarted(): Promise<void> {
  * card first. The response echoes the composed instruction; the work streams to the WS.
  */
 async function handleApiPost(url: URL, req: Request): Promise<Response | undefined> {
+	// Switch the session model (operator control, not an agent tool — no approval gate).
+	if (url.pathname === "/api/model") {
+		const body = (await req.json().catch(() => ({}))) as { provider?: string; id?: string };
+		if (typeof body.provider !== "string" || typeof body.id !== "string") return json({ error: "provider and id are required" }, 400);
+		await ensureStarted();
+		const result = await adapter.setModelByRef(body.provider, body.id);
+		return json(result, result.error ? 409 : 200);
+	}
 	const promoteM = url.pathname.match(/^\/api\/campaigns\/([^/]+)\/findings\/([^/]+)\/request-promote$/);
 	if (promoteM) {
 		const instruction = composePromoteRequest(decodeURIComponent(promoteM[1]), decodeURIComponent(promoteM[2]));

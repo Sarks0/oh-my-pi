@@ -1,4 +1,4 @@
-import type { ApprovalRecord, CampaignDetail, CampaignSummary, CoverageGraph, FindingDetail, McpInfo, Programme, SessionInfo, SkillsInfo, WsFrame } from "./types";
+import type { ApprovalRecord, CampaignDetail, CampaignSummary, CoverageGraph, FindingDetail, McpInfo, ModelsInfo, Programme, SessionInfo, SkillsInfo, SwitchResult, WsFrame } from "./types";
 
 async function getJson<T>(path: string): Promise<T> {
 	const r = await fetch(path);
@@ -40,6 +40,8 @@ export const api = {
 	session: () => getJson<SessionInfo>("/api/session"),
 	mcp: () => getJson<McpInfo>("/api/mcp"),
 	skills: () => getJson<SkillsInfo>("/api/skills"),
+	models: () => getJson<ModelsInfo>("/api/models"),
+	setModel: (provider: string, id: string) => postJson<SwitchResult>("/api/model", { provider, id }),
 };
 
 export interface WsHandle {
