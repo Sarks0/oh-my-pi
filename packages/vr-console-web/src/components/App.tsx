@@ -8,6 +8,7 @@ import { SessionPanel } from "./SessionPanel";
 import { Agent } from "./Agent";
 import { Mcp } from "./Mcp";
 import { Skills } from "./Skills";
+import { Llm } from "./Llm";
 
 function SessionPage() {
 	return (
@@ -40,7 +41,7 @@ const NAV_FUNCTIONS = [
 	{ label: "HITL Session", href: "#/session" },
 ];
 const NAV_SYSTEM: { label: string; href?: string }[] = [
-	{ label: "LLM" },
+	{ label: "LLM", href: "#/llm" },
 	{ label: "Agent", href: "#/agent" },
 	{ label: "MCP", href: "#/mcp" },
 	{ label: "Skills", href: "#/skills" },
@@ -84,7 +85,7 @@ export function App() {
 				</div>
 			</nav>
 			<main className="main">
-				{hash === "#/programmes" ? <Programmes /> : hash === "#/approvals" ? <ApprovalRecords /> : hash === "#/session" ? <SessionPage /> : hash === "#/agent" ? <Agent /> : hash === "#/mcp" ? <Mcp /> : hash === "#/skills" ? <Skills /> : campaignMatch ? <CampaignView id={decodeURIComponent(campaignMatch[1])} /> : <Dashboard />}
+				{hash === "#/programmes" ? <Programmes /> : hash === "#/approvals" ? <ApprovalRecords /> : hash === "#/session" ? <SessionPage /> : hash === "#/agent" ? <Agent /> : hash === "#/mcp" ? <Mcp /> : hash === "#/skills" ? <Skills /> : hash === "#/llm" ? <Llm /> : campaignMatch ? <CampaignView id={decodeURIComponent(campaignMatch[1])} /> : <Dashboard />}
 			</main>
 		</div>
 	);

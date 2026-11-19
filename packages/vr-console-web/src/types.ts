@@ -118,3 +118,20 @@ export interface SkillsInfo {
 	skills: SkillInfo[];
 	warnings: string[];
 }
+export interface ModelDTO {
+	id: string;
+	name: string;
+	provider: string;
+	api: string | null;
+	contextWindow: number | null;
+}
+export interface ModelsInfo {
+	started: boolean;
+	current: ModelDTO | null;
+	models: Array<ModelDTO & { current: boolean }>;
+}
+export interface SwitchResult {
+	switched: boolean;
+	current: ModelDTO | null;
+	error?: string;
+}

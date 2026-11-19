@@ -27,4 +27,18 @@ describe("OmpSessionAdapter introspection — cold (not started)", () => {
 		expect(info.connectedServers).toEqual([]);
 		expect(info.tools).toEqual([]);
 	});
+
+	test("listModels is empty with no current model before a session exists", () => {
+		const info = make().listModels();
+		expect(info.started).toBe(false);
+		expect(info.current).toBeNull();
+		expect(info.models).toEqual([]);
+	});
+
+	test("setModelByRef fails closed when the session is not started", async () => {
+		const res = await make().setModelByRef("anthropic", "claude-opus-4-8");
+		expect(res.switched).toBe(false);
+		expect(res.current).toBeNull();
+		expect(res.error).toMatch(/not started/);
+	});
 });
