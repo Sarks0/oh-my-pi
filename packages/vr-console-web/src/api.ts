@@ -1,4 +1,4 @@
-import type { ApprovalRecord, CampaignDetail, CampaignSummary, CoverageGraph, FindingDetail, McpInfo, ModelsInfo, Programme, SessionInfo, SkillsInfo, SwitchResult, WsFrame } from "./types";
+import type { ApprovalRecord, CampaignDetail, CampaignSummary, CoverageGraph, FindingDetail, McpInfo, ModelsInfo, Programme, SessionInfo, SessionListItem, SessionMeta, SkillsInfo, SwitchResult, WsFrame } from "./types";
 
 async function getJson<T>(path: string): Promise<T> {
 	const r = await fetch(path);
@@ -13,6 +13,13 @@ async function postJson<T>(path: string, body?: unknown): Promise<T> {
 		headers: { "content-type": "application/json" },
 		body: body !== undefined ? JSON.stringify(body) : undefined,
 	});
+	const d = await r.json().catch(() => ({}));
+	if (!r.ok) throw new Error((d as { error?: string }).error ?? `HTTP ${r.status}`);
+	return d as T;
+}
+
+async function delJson<T>(path: string): Promise<T> {
+	const r = await fetch(path, { method: "DELETE" });
 	const d = await r.json().catch(() => ({}));
 	if (!r.ok) throw new Error((d as { error?: string }).error ?? `HTTP ${r.status}`);
 	return d as T;
@@ -42,6 +49,10 @@ export const api = {
 	skills: () => getJson<SkillsInfo>("/api/skills"),
 	models: () => getJson<ModelsInfo>("/api/models"),
 	setModel: (provider: string, id: string) => postJson<SwitchResult>("/api/model", { provider, id }),
+	// multi-session
+	sessions: () => getJson<SessionListItem[]>("/api/sessions"),
+	createSession: (cwd?: string, title?: string) => postJson<SessionMeta>("/api/sessions", { cwd, title }),
+	deleteSession: (id: string) => delJson<{ disposed: boolean }>(`/api/sessions/${enc(id)}`),
 };
 
 export interface WsHandle {
@@ -49,13 +60,13 @@ export interface WsHandle {
 	close: () => void;
 }
 
-/** Reconnecting WebSocket to vr-console-server. */
-export function connectWs(onFrame: (f: WsFrame) => void, onStatus: (connected: boolean) => void): WsHandle {
+/** Reconnecting WebSocket to vr-console-server, bound to one session. */
+export function connectWs(sessionId: string, onFrame: (f: WsFrame) => void, onStatus: (connected: boolean) => void): WsHandle {
 	let ws: WebSocket | undefined;
 	let closed = false;
 	const open = () => {
 		const proto = location.protocol === "https:" ? "wss" : "ws";
-		ws = new WebSocket(`${proto}://${location.host}/ws`);
+		ws = new WebSocket(`${proto}://${location.host}/ws?session=${encodeURIComponent(sessionId)}`);
 		ws.onopen = () => onStatus(true);
 		ws.onmessage = e => {
 			try {

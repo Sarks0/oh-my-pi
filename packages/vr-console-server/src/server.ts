@@ -1,30 +1,32 @@
 /**
- * vr-console-server (Bun) — HTTP + WebSocket transport around one omp session via
- * the OmpSessionAdapter. Phase 1 Increment 1: live event stream + real approval
- * cards (no autoApprove).
+ * vr-console-server (Bun) — HTTP + WebSocket transport over a SessionRegistry of
+ * omp sessions. A "default" session is created from VR_CONSOLE_CWD at boot so the
+ * VR domain panels and every unscoped route keep working; more sessions are made
+ * on demand (POST /api/sessions) and addressed under /api/sessions/:id/*.
  *
- * WS protocol:
- *   inbound  { type:"prompt", text }              -> adapter.prompt(text)
+ * WS protocol ( /ws?session=<id> — defaults to the "default" session ):
+ *   inbound  { type:"prompt", text }              -> that session's prompt
  *            { type:"reply",  id, value }          -> resolve a pending UI request
  *                                                     (value: approval answer / select / confirm / input)
- *   outbound shaped AgentSessionEvent frames (event-shape.ts)
+ *   outbound shaped AgentSessionEvent frames (event-shape.ts), scoped to the
+ *            session the socket is bound to (and replayed from history on connect)
  *            { type:"approval_request", id, full, compact, session?, grants? }
  *            { type:"select_request"|"confirm_request"|"input_request", id, ... }
  *            { type:"notice", level, message }
  *
  * Run:  bun run packages/vr-console-server/src/server.ts
- * Env:  PORT (8800)   VR_CONSOLE_CWD (session cwd; a vr-lab campaign dir on the host)
+ * Env:  PORT (8800)   VR_CONSOLE_CWD (the default session's cwd; a vr-lab campaign dir)
  */
 import { join } from "node:path";
 import { discoverSkills } from "@oh-my-pi/pi-coding-agent";
-import { OmpSessionAdapter } from "./adapter/omp-session-adapter";
+import { SessionRegistry } from "./session/registry";
 import { buildCoverageGraph, getCampaign, getFinding, listCampaigns, resolveEvidenceFile } from "./campaign/reader";
 import { composeGateRecordRequest, composePromoteRequest } from "./campaign/requests";
 import { listProgrammes } from "./programmes/reader";
 import { type Db, makeDb, migrate } from "./db/client";
 import { syncCampaigns } from "./db/projection";
-import { costSummary, recentUsage, recordUsage, usageFromEvent } from "./cost/ledger";
-import { listApprovalRecords, makeDbAuditor } from "./approval/audit";
+import { costSummary, recentUsage } from "./cost/ledger";
+import { listApprovalRecords } from "./approval/audit";
 
 const PORT = Number(process.env.PORT ?? 8800);
 const CWD = process.env.VR_CONSOLE_CWD ?? process.cwd();
@@ -70,32 +72,59 @@ function requireLabRoot(): string {
 	return LAB_ROOT;
 }
 
+/** Skills for a cwd — a pure FS/settings read, so no running session is needed. */
+async function readSkills(cwd: string): Promise<{ skills: Array<{ name: string; description: string }>; warnings: string[] }> {
+	const { skills, warnings } = await discoverSkills(cwd);
+	return {
+		skills: skills.map((s: { name: string; description?: string }) => ({ name: s.name, description: s.description ?? "" })),
+		warnings: Array.isArray(warnings) ? warnings.map((w: unknown) => String((w as { message?: string })?.message ?? w)) : [],
+	};
+}
+
 /** Read-only campaign REST API (DESIGN §3/§5 — host FS is truth; never writes). */
-async function handleApi(url: URL): Promise<Response | undefined> {
+async function handleApi(url: URL, method: string): Promise<Response | undefined> {
 	if (url.pathname === "/api/health") {
 		return json({ ok: true, cwd: CWD, labRoot: LAB_ROOT || null, db: !!db });
 	}
 	// --- omp operational panels (general cockpit, not VR-specific) ---
-	// Each forces the single session to start so the panel shows live omp state.
+	// The unscoped routes target the DEFAULT session (back-compat); the session
+	// list and the /api/sessions/:id/* routes below are the multi-session surface.
+	if (url.pathname === "/api/sessions") {
+		return json(registry.list());
+	}
+	const sm = matchSession(url.pathname);
+	if (sm && method === "GET") {
+		if (!registry.has(sm.id)) return json({ error: `no such session: ${sm.id}` }, 404);
+		if (sm.rest === "session") {
+			await registry.ensureStarted(sm.id);
+			return json(registry.adapter(sm.id)!.sessionInfo());
+		}
+		if (sm.rest === "mcp") {
+			await registry.ensureStarted(sm.id);
+			return json(registry.adapter(sm.id)!.mcpInfo());
+		}
+		if (sm.rest === "models") {
+			await registry.ensureStarted(sm.id);
+			return json(registry.adapter(sm.id)!.listModels());
+		}
+		if (sm.rest === "skills") {
+			return json(await readSkills(registry.meta(sm.id)!.cwd));
+		}
+	}
 	if (url.pathname === "/api/session") {
 		await ensureStarted();
-		return json(adapter.sessionInfo());
+		return json(defaultAdapter().sessionInfo());
 	}
 	if (url.pathname === "/api/mcp") {
 		await ensureStarted();
-		return json(adapter.mcpInfo());
+		return json(defaultAdapter().mcpInfo());
 	}
 	if (url.pathname === "/api/models") {
 		await ensureStarted();
-		return json(adapter.listModels());
+		return json(defaultAdapter().listModels());
 	}
 	if (url.pathname === "/api/skills") {
-		// discoverSkills is a pure FS/settings read — no running session needed.
-		const { skills, warnings } = await discoverSkills(CWD);
-		return json({
-			skills: skills.map((s: { name: string; description?: string }) => ({ name: s.name, description: s.description ?? "" })),
-			warnings: Array.isArray(warnings) ? warnings.map((w: unknown) => String((w as { message?: string })?.message ?? w)) : [],
-		});
+		return json(await readSkills(CWD));
 	}
 	if (url.pathname === "/api/cost") {
 		return json(db ? await costSummary(db) : { enabled: false });
@@ -145,27 +174,29 @@ async function handleApi(url: URL): Promise<Response | undefined> {
 	return undefined;
 }
 
-const sockets = new Set<Bun.ServerWebSocket<unknown>>();
-function broadcast(frame: unknown): void {
-	const text = JSON.stringify(frame);
-	for (const ws of sockets) ws.send(text);
+// Many sessions behind one server. The "default" session is created from
+// VR_CONSOLE_CWD at boot so every existing route and the VR domain panels keep
+// targeting it; additional sessions are created on demand via /api/sessions.
+const DEFAULT_ID = "default";
+const registry = new SessionRegistry({ db });
+registry.create({ id: DEFAULT_ID, cwd: CWD, title: campaignIdFromCwd(CWD) ?? "primary" });
+
+/** The default session's adapter — the target of the back-compat (unscoped) routes. */
+function defaultAdapter() {
+	const a = registry.adapter(DEFAULT_ID);
+	if (!a) throw new Error("default session missing");
+	return a;
+}
+/** Start the default session (back-compat `ensureStarted()` with no id). */
+function ensureStarted(): Promise<void> {
+	return registry.ensureStarted(DEFAULT_ID);
 }
 
-// One shared adapter/session, created lazily on first client. When a DB is
-// configured, tap the raw event stream to append the cost ledger at message_end.
-const adapter = new OmpSessionAdapter(broadcast, {
-	onRawEvent: db
-		? ev => {
-				const row = usageFromEvent(ev, { cwd: CWD, campaignId: campaignIdFromCwd(CWD) });
-				if (row) recordUsage(db!, row).catch(() => {});
-			}
-		: undefined,
-	approvalAuditor: db ? makeDbAuditor(db, { cwd: CWD, campaignId: campaignIdFromCwd(CWD) }) : undefined,
-});
-let startPromise: Promise<void> | undefined;
-function ensureStarted(): Promise<void> {
-	if (!startPromise) startPromise = adapter.start(CWD);
-	return startPromise;
+/** Resolve a session route `/api/sessions/:id/<rest>` → { id, rest } or undefined. */
+function matchSession(pathname: string): { id: string; rest: string } | undefined {
+	const m = pathname.match(/^\/api\/sessions\/([^/]+)(?:\/(.*))?$/);
+	if (!m) return undefined;
+	return { id: decodeURIComponent(m[1]), rest: m[2] ?? "" };
 }
 
 /**
@@ -174,20 +205,47 @@ function ensureStarted(): Promise<void> {
  * the agent calls the host campaign-mcp tool, which is a mutation and raises an approval
  * card first. The response echoes the composed instruction; the work streams to the WS.
  */
-async function handleApiPost(url: URL, req: Request): Promise<Response | undefined> {
-	// Switch the session model (operator control, not an agent tool — no approval gate).
-	if (url.pathname === "/api/model") {
+async function handleApiWrite(url: URL, req: Request): Promise<Response | undefined> {
+	// --- multi-session lifecycle ---
+	if (url.pathname === "/api/sessions" && req.method === "POST") {
+		const body = (await req.json().catch(() => ({}))) as { cwd?: string; title?: string };
+		const cwd = typeof body.cwd === "string" && body.cwd.trim() ? body.cwd.trim() : CWD;
+		const meta = registry.create({ cwd, title: body.title });
+		return json(meta, 201);
+	}
+	const sm = matchSession(url.pathname);
+	if (sm) {
+		if (!registry.has(sm.id)) return json({ error: `no such session: ${sm.id}` }, 404);
+		// Switch a session's model (operator control, not an agent tool — no approval gate).
+		if (sm.rest === "model" && req.method === "POST") {
+			const body = (await req.json().catch(() => ({}))) as { provider?: string; id?: string };
+			if (typeof body.provider !== "string" || typeof body.id !== "string") return json({ error: "provider and id are required" }, 400);
+			await registry.ensureStarted(sm.id);
+			const result = await registry.adapter(sm.id)!.setModelByRef(body.provider, body.id);
+			return json(result, result.error ? 409 : 200);
+		}
+		if (sm.rest === "" && req.method === "DELETE") {
+			if (sm.id === DEFAULT_ID) return json({ error: "the default session cannot be disposed" }, 400);
+			await registry.dispose(sm.id);
+			return json({ disposed: true });
+		}
+	}
+
+	// --- back-compat (default session) model switch ---
+	if (url.pathname === "/api/model" && req.method === "POST") {
 		const body = (await req.json().catch(() => ({}))) as { provider?: string; id?: string };
 		if (typeof body.provider !== "string" || typeof body.id !== "string") return json({ error: "provider and id are required" }, 400);
 		await ensureStarted();
-		const result = await adapter.setModelByRef(body.provider, body.id);
+		const result = await defaultAdapter().setModelByRef(body.provider, body.id);
 		return json(result, result.error ? 409 : 200);
 	}
+
+	// --- VR operator action requests (target the default/VR session) ---
 	const promoteM = url.pathname.match(/^\/api\/campaigns\/([^/]+)\/findings\/([^/]+)\/request-promote$/);
 	if (promoteM) {
 		const instruction = composePromoteRequest(decodeURIComponent(promoteM[1]), decodeURIComponent(promoteM[2]));
 		await ensureStarted();
-		adapter.prompt(instruction).catch(() => {}); // fire; the turn (and its approval card) stream to the WS
+		defaultAdapter().prompt(instruction).catch(() => {}); // fire; the turn (and its approval card) stream to the WS
 		return json({ requested: true, instruction });
 	}
 	const gateM = url.pathname.match(/^\/api\/campaigns\/([^/]+)\/findings\/([^/]+)\/gates\/([^/]+)\/request-record$/);
@@ -196,27 +254,34 @@ async function handleApiPost(url: URL, req: Request): Promise<Response | undefin
 		const status = typeof body.status === "string" ? body.status : "passed";
 		const instruction = composeGateRecordRequest(decodeURIComponent(gateM[1]), decodeURIComponent(gateM[2]), decodeURIComponent(gateM[3]), status);
 		await ensureStarted();
-		adapter.prompt(instruction).catch(() => {});
+		defaultAdapter().prompt(instruction).catch(() => {});
 		return json({ requested: true, instruction });
 	}
 	return undefined;
 }
 
-const server = Bun.serve({
+/** Per-socket data: which session this WebSocket is bound to (set at upgrade). */
+interface WsData {
+	sessionId: string;
+}
+
+const server = Bun.serve<WsData>({
 	port: PORT,
 	async fetch(req, srv) {
 		const url = new URL(req.url);
 		if (url.pathname === "/ws") {
-			if (srv.upgrade(req)) return;
+			// A socket is bound to one session for its lifetime (chosen at connect time).
+			const sessionId = url.searchParams.get("session") || DEFAULT_ID;
+			if (srv.upgrade(req, { data: { sessionId } })) return;
 			return new Response("websocket upgrade failed", { status: 400 });
 		}
 		if (url.pathname.startsWith("/api/")) {
 			try {
-				if (req.method === "POST") {
-					const posted = await handleApiPost(url, req);
-					if (posted) return posted;
+				if (req.method === "POST" || req.method === "DELETE") {
+					const written = await handleApiWrite(url, req);
+					if (written) return written;
 				}
-				const res = await handleApi(url);
+				const res = await handleApi(url, req.method);
 				if (res) return res;
 			} catch (err) {
 				return json({ error: String(err) }, err instanceof Error && /VR_LAB_ROOT/.test(err.message) ? 400 : 500);
@@ -231,14 +296,20 @@ const server = Bun.serve({
 	},
 	websocket: {
 		open(ws) {
-			sockets.add(ws);
-			ws.send(JSON.stringify({ type: "notice", level: "info", message: `connected; cwd=${CWD}` }));
-			ensureStarted().catch(err =>
+			const { sessionId } = ws.data;
+			if (!registry.attach(sessionId, ws)) {
+				ws.send(JSON.stringify({ type: "notice", level: "error", message: `no such session: ${sessionId}` }));
+				ws.close();
+				return;
+			}
+			const meta = registry.meta(sessionId);
+			ws.send(JSON.stringify({ type: "notice", level: "info", message: `connected; session=${sessionId} cwd=${meta?.cwd ?? "?"}` }));
+			registry.ensureStarted(sessionId).catch(err =>
 				ws.send(JSON.stringify({ type: "notice", level: "error", message: `session start failed: ${String(err)}` })),
 			);
 		},
 		close(ws) {
-			sockets.delete(ws);
+			registry.detach(ws);
 		},
 		async message(ws, raw) {
 			let msg: { type?: string; text?: string; id?: string; value?: unknown };
@@ -247,9 +318,15 @@ const server = Bun.serve({
 			} catch {
 				return;
 			}
+			const { sessionId } = ws.data;
+			const adapter = registry.adapter(sessionId);
+			if (!adapter) {
+				ws.send(JSON.stringify({ type: "notice", level: "error", message: `session ${sessionId} is gone` }));
+				return;
+			}
 			if (msg?.type === "prompt" && typeof msg.text === "string") {
 				try {
-					await ensureStarted();
+					await registry.ensureStarted(sessionId);
 					await adapter.prompt(msg.text);
 				} catch (err) {
 					ws.send(JSON.stringify({ type: "notice", level: "error", message: `prompt failed: ${String(err)}` }));
@@ -262,11 +339,11 @@ const server = Bun.serve({
 	},
 });
 
-console.log(`[vr-console-server] http://localhost:${server.port}  (cwd=${CWD})`);
+console.log(`[vr-console-server] http://localhost:${server.port}  (default cwd=${CWD})`);
 
 async function shutdown(): Promise<void> {
 	try {
-		await adapter.dispose();
+		await registry.disposeAll();
 	} finally {
 		process.exit(0);
 	}

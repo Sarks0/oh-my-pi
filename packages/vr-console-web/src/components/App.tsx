@@ -9,15 +9,31 @@ import { Agent } from "./Agent";
 import { Mcp } from "./Mcp";
 import { Skills } from "./Skills";
 import { Llm } from "./Llm";
+import { Sessions } from "./Sessions";
+import type { SessionListItem } from "../types";
 
-function SessionPage() {
+function SessionPage({ activeId, onSelect }: { activeId: string; onSelect: (id: string) => void }) {
+	const [sessions, setSessions] = useState<SessionListItem[]>([]);
+	useEffect(() => {
+		api.sessions().then(setSessions).catch(() => setSessions([]));
+	}, [activeId]);
+	const active = sessions.find(s => s.id === activeId);
 	return (
 		<div>
 			<div className="pagehead">
 				<h1>HITL Session</h1>
 				<span className="sub">the live agent session — prompt it, watch tool calls, approve/deny inline</span>
+				<label className="meta" style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
+					session
+					<select value={activeId} onChange={e => onSelect(e.target.value)}>
+						{sessions.length === 0 && <option value={activeId}>{activeId}</option>}
+						{sessions.map(s => <option key={s.id} value={s.id}>{s.title}{s.id === "default" ? " (default)" : ""}</option>)}
+					</select>
+				</label>
 			</div>
-			<SessionPanel />
+			{active && <div className="meta mono" style={{ marginBottom: 8, fontSize: 11 }}>cwd: {active.cwd}{active.model ? ` · ${active.model}` : ""}</div>}
+			{/* key forces a fresh panel (and WS) when the session changes */}
+			<SessionPanel key={activeId} sessionId={activeId} />
 		</div>
 	);
 }
@@ -39,6 +55,7 @@ const NAV_FUNCTIONS = [
 	{ label: "Findings + Gates", href: "#/", hint: "open a campaign" },
 	{ label: "Surface Graph", href: "#/", hint: "open a campaign" },
 	{ label: "HITL Session", href: "#/session" },
+	{ label: "Sessions", href: "#/sessions" },
 ];
 const NAV_SYSTEM: { label: string; href?: string }[] = [
 	{ label: "LLM", href: "#/llm" },
@@ -51,6 +68,17 @@ const NAV_SYSTEM: { label: string; href?: string }[] = [
 export function App() {
 	const hash = useHashRoute();
 	const [health, setHealth] = useState<{ labRoot: string | null } | null>(null);
+	const [activeSession, setActiveSession] = useState<string>(() => {
+		try { return localStorage.getItem("vrc.session") || "default"; } catch { return "default"; }
+	});
+	const selectSession = (id: string) => {
+		setActiveSession(id);
+		try { localStorage.setItem("vrc.session", id); } catch { /* private mode */ }
+	};
+	const openSession = (id: string) => {
+		selectSession(id);
+		location.hash = "#/session";
+	};
 	useEffect(() => {
 		api.health().then(setHealth).catch(() => setHealth(null));
 	}, []);
@@ -85,7 +113,7 @@ export function App() {
 				</div>
 			</nav>
 			<main className="main">
-				{hash === "#/programmes" ? <Programmes /> : hash === "#/approvals" ? <ApprovalRecords /> : hash === "#/session" ? <SessionPage /> : hash === "#/agent" ? <Agent /> : hash === "#/mcp" ? <Mcp /> : hash === "#/skills" ? <Skills /> : hash === "#/llm" ? <Llm /> : campaignMatch ? <CampaignView id={decodeURIComponent(campaignMatch[1])} /> : <Dashboard />}
+				{hash === "#/programmes" ? <Programmes /> : hash === "#/approvals" ? <ApprovalRecords /> : hash === "#/session" ? <SessionPage activeId={activeSession} onSelect={selectSession} /> : hash === "#/sessions" ? <Sessions activeId={activeSession} onOpen={openSession} /> : hash === "#/agent" ? <Agent /> : hash === "#/mcp" ? <Mcp /> : hash === "#/skills" ? <Skills /> : hash === "#/llm" ? <Llm /> : campaignMatch ? <CampaignView id={decodeURIComponent(campaignMatch[1])} /> : <Dashboard />}
 			</main>
 		</div>
 	);
