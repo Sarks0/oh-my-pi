@@ -15,7 +15,8 @@
 import { OmpSessionAdapter } from "../adapter/omp-session-adapter";
 import type { Db } from "../db/client";
 import { recordUsage, usageFromEvent } from "../cost/ledger";
-import { makeDbAuditor } from "../approval/audit";
+import { makeDbAuditor, makeFileAuditor } from "../approval/audit";
+import { type ApprovalConfig, SAFE_DEFAULT_CONFIG } from "../approval/policy";
 
 /** Frames kept per session for replay to a newly-attached socket. */
 const HISTORY_CAP = 300;
@@ -57,9 +58,13 @@ function defaultTitle(cwd: string, id: string): string {
 export class SessionRegistry {
 	#sessions = new Map<string, ManagedSession>();
 	#db: Db | undefined;
+	#approvalConfig: ApprovalConfig;
+	#auditLogPath: string | undefined;
 
-	constructor(deps: { db?: Db } = {}) {
+	constructor(deps: { db?: Db; approvalConfig?: ApprovalConfig; auditLogPath?: string } = {}) {
 		this.#db = deps.db;
+		this.#approvalConfig = deps.approvalConfig ?? SAFE_DEFAULT_CONFIG;
+		this.#auditLogPath = deps.auditLogPath;
 	}
 
 	/** Create a session (adapter built, not yet started). Returns its metadata. */
@@ -90,6 +95,9 @@ export class SessionRegistry {
 		};
 
 		const db = this.#db;
+		const auditCtx = { cwd: meta.cwd, campaignId: campaignIdFromCwd(meta.cwd) };
+		// Always keep an audit trail: Postgres when configured, else append-only JSONL.
+		const approvalAuditor = db ? makeDbAuditor(db, auditCtx) : this.#auditLogPath ? makeFileAuditor(this.#auditLogPath, auditCtx) : undefined;
 		const adapter = new OmpSessionAdapter(broadcast, {
 			onRawEvent: db
 				? ev => {
@@ -97,7 +105,8 @@ export class SessionRegistry {
 						if (row) recordUsage(db, row).catch(() => {});
 					}
 				: undefined,
-			approvalAuditor: db ? makeDbAuditor(db, { cwd: meta.cwd, campaignId: campaignIdFromCwd(meta.cwd) }) : undefined,
+			approvalAuditor,
+			approvalConfig: this.#approvalConfig,
 		});
 
 		this.#sessions.set(id, { meta, adapter, sockets, history });

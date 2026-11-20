@@ -18,6 +18,10 @@ interface Pending {
 
 export class PendingRegistry {
 	#seq = 0;
+	// A per-registry nonce prefixes every id, so a reply buffered in a browser before
+	// a session restart (ids reset to _1) can never resolve a new request that happens
+	// to reuse the same sequence number (P2-3).
+	#prefix = crypto.randomUUID().slice(0, 8);
 	#pending = new Map<string, Pending>();
 
 	constructor(private broadcast: Broadcast) {}
@@ -29,7 +33,7 @@ export class PendingRegistry {
 
 	/** Like {@link request}, but also returns the minted id (for correlating an audit). */
 	requestWithId(kind: string, frame: Record<string, unknown>): { id: string; promise: Promise<unknown> } {
-		const id = kind + "_" + ++this.#seq;
+		const id = `${this.#prefix}_${kind}_${++this.#seq}`;
 		const promise = new Promise<unknown>(resolve => {
 			this.#pending.set(id, { resolve, kind });
 			this.broadcast({ ...frame, type: frame.type ?? kind, id });

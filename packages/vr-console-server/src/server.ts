@@ -20,6 +20,7 @@
 import { join } from "node:path";
 import { discoverSkills } from "@oh-my-pi/pi-coding-agent";
 import { checkAuth, makeToken } from "./auth";
+import { loadApprovalConfig } from "./approval/policy";
 import { SessionRegistry } from "./session/registry";
 import { buildCoverageGraph, getCampaign, getFinding, listCampaigns, resolveEvidenceFile } from "./campaign/reader";
 import { composeGateRecordRequest, composePromoteRequest } from "./campaign/requests";
@@ -91,7 +92,11 @@ async function readSkills(cwd: string): Promise<{ skills: Array<{ name: string; 
 /** Read-only campaign REST API (DESIGN §3/§5 — host FS is truth; never writes). */
 async function handleApi(url: URL, method: string): Promise<Response | undefined> {
 	if (url.pathname === "/api/health") {
-		return json({ ok: true, cwd: CWD, labRoot: LAB_ROOT || null, db: !!db });
+		// Readiness without forcing a start: the default session's current (possibly cold)
+		// state. started=false means no session yet; mcp.tools=0 after start means the cwd
+		// exposed no MCP tools (not ready for lab work).
+		const s = defaultAdapter().sessionInfo();
+		return json({ ok: true, cwd: CWD, labRoot: LAB_ROOT || null, db: !!db, ready: s.started, started: s.started, mcp: s.mcp });
 	}
 	// --- omp operational panels (general cockpit, not VR-specific) ---
 	// The unscoped routes target the DEFAULT session (back-compat); the session
@@ -185,7 +190,16 @@ async function handleApi(url: URL, method: string): Promise<Response | undefined
 // VR_CONSOLE_CWD at boot so every existing route and the VR domain panels keep
 // targeting it; additional sessions are created on demand via /api/sessions.
 const DEFAULT_ID = "default";
-const registry = new SessionRegistry({ db });
+// Approval posture (safe by default: nothing auto-runs, mutations/unknowns denied until
+// VR_CONSOLE_ALLOW_MUTATIONS=1 and an allowlist are set). Audit always has a trail:
+// Postgres when configured, else append-only JSONL beside the campaign.
+const approvalConfig = await loadApprovalConfig();
+const AUDIT_LOG = (process.env.VR_CONSOLE_AUDIT_LOG ?? "").trim() || join(CWD, ".vr-console-audit.jsonl");
+console.log(
+	`[vr-console-server] approvals: ${approvalConfig.allowMutations ? "mutations ENABLED (card)" : "read-only-only (mutations denied)"}; ` +
+		`${approvalConfig.autoAllow.size} auto-allow; audit → ${db ? "postgres" : AUDIT_LOG}`,
+);
+const registry = new SessionRegistry({ db, approvalConfig, auditLogPath: AUDIT_LOG });
 registry.create({ id: DEFAULT_ID, cwd: CWD, title: campaignIdFromCwd(CWD) ?? "primary" });
 
 /** The default session's adapter — the target of the back-compat (unscoped) routes. */
@@ -314,6 +328,10 @@ const server = Bun.serve<WsData>({
 		return new Response("not found", { status: 404 });
 	},
 	websocket: {
+		// Cap inbound frames so a client cannot push an unbounded payload (P2-5); a
+		// prompt is further length-limited in the message handler. The replay history
+		// buffer is bounded separately in the registry (HISTORY_CAP).
+		maxPayloadLength: 1 << 20, // 1 MiB
 		open(ws) {
 			const { sessionId } = ws.data;
 			if (!registry.attach(sessionId, ws)) {
@@ -344,6 +362,10 @@ const server = Bun.serve<WsData>({
 				return;
 			}
 			if (msg?.type === "prompt" && typeof msg.text === "string") {
+				if (msg.text.length > 100_000) {
+					ws.send(JSON.stringify({ type: "notice", level: "warn", message: "prompt rejected: too long (max 100k chars)" }));
+					return;
+				}
 				try {
 					await registry.ensureStarted(sessionId);
 					await adapter.prompt(msg.text);

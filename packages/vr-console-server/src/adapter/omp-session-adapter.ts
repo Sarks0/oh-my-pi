@@ -18,7 +18,7 @@
  */
 import { createAgentSession, discoverMCPServers, SessionManager, Settings } from "@oh-my-pi/pi-coding-agent";
 import { createConsoleUIContext } from "../approval/ui-context";
-import { compileApprovalPolicy, summarizePolicy } from "../approval/policy";
+import { type ApprovalConfig, compileApprovalPolicy, SAFE_DEFAULT_CONFIG, summarizePolicy } from "../approval/policy";
 import { PendingRegistry } from "../approval/pending";
 import type { Broadcast } from "../approval/pending";
 import { shapeEvent } from "../event-shape";
@@ -48,7 +48,12 @@ export class OmpSessionAdapter {
 	 *  opts.approvalAuditor records approve/deny decisions. */
 	constructor(
 		private broadcast: Broadcast,
-		private opts: { onRawEvent?: (ev: unknown) => void; approvalAuditor?: import("../approval/audit").ApprovalAuditor } = {},
+		private opts: {
+			onRawEvent?: (ev: unknown) => void;
+			approvalAuditor?: import("../approval/audit").ApprovalAuditor;
+			/** Auto-allow allowlist + mutations opt-in; defaults to the safe posture. */
+			approvalConfig?: ApprovalConfig;
+		} = {},
 	) {
 		this.pending = new PendingRegistry(broadcast);
 	}
@@ -66,7 +71,7 @@ export class OmpSessionAdapter {
 			const disc = await discoverMCPServers(cwd);
 			discoveredManager = disc.manager;
 			const names = disc.tools.map((t: any) => t.name as string);
-			seededPolicy = compileApprovalPolicy(names);
+			seededPolicy = compileApprovalPolicy(names, this.opts.approvalConfig ?? SAFE_DEFAULT_CONFIG);
 			const s = summarizePolicy(seededPolicy);
 			this.broadcast({
 				type: "notice",
