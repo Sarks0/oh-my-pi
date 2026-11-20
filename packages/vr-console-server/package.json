@@ -1,0 +1,20 @@
+{
+	"name": "@oh-my-pi/vr-console-server",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "VR Console backend — embeds the omp SDK in-process and adds an HTTP+WebSocket transport, with a real human approval seam (Phase 1).",
+	"bin": {
+		"omp-vr-console": "src/server.ts"
+	},
+	"scripts": {
+		"start": "bun run src/server.ts",
+		"test": "bun test"
+	},
+	"dependencies": {
+		"@oh-my-pi/pi-coding-agent": "catalog:"
+	},
+	"devDependencies": {
+		"@types/bun": "catalog:"
+	}
+}
