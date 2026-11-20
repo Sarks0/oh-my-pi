@@ -13,7 +13,7 @@ servers + VMs; DESIGN §1). v1 is localhost-only.
 
 ## 0. Prerequisites
 
-- **This fork**, on branch `raven/gracious-bohr-z8xqrx`, checked out on the host.
+- **This fork**, on branch `vr-console`, checked out on the host.
 - **Bun** ≥ 1.4 (`curl -fsSL https://bun.sh/install | sh`).
 - A working **Rust toolchain** (for the omp native addon) — or a prebuilt
   `packages/natives/native/*.node` already present.
@@ -54,21 +54,32 @@ export VR_LAB_ROOT=/path/to/vr-lab                                  # campaigns/
 export VR_CONSOLE_CWD="$VR_LAB_ROOT/campaigns/active/<campaign-id>" # the agent session's cwd
 export PORT=8800
 bun run packages/vr-console-server/src/server.ts
-# → http://localhost:8800
+# prints:  open:  http://127.0.0.1:8800/?token=<random>
 ```
+
+**Auth.** The server binds `127.0.0.1` only and mints a random per-launch token,
+printed once in the launch URL above. That token is required on every `/api/*`
+request, the `/ws` upgrade, and `/debug`; a cross-site `Origin` or a non-loopback
+`Host` is rejected outright. Open the printed URL: the SPA stores the token and
+strips it from the address bar. Set a fixed token with `VR_CONSOLE_TOKEN` (for a
+reverse proxy or scripts). This is what keeps a web page the operator visits, or
+another local process, from driving the agent or approving a tool call.
 
 Why `VR_CONSOLE_CWD` points at a campaign dir under the vr-lab checkout: omp
 discovers the vr-lab MCP servers from that cwd (it walks up to `$VR_LAB_ROOT/.mcp.json`),
-and the agent operates in that campaign's context. One running server drives **one**
-omp session (omp's single-writer lease, DESIGN §1.4); to work several campaigns at
-once, run several instances on different `PORT`s and `VR_CONSOLE_CWD`s.
+and the agent operates in that campaign's context. `VR_CONSOLE_CWD` is the **default**
+session's cwd; the console is multi-session, so you can create more sessions (each
+with its own cwd, model, and approval state) from the **Sessions** page without a
+second server.
 
 ### Environment variables
 
 | var | default | meaning |
 |---|---|---|
 | `PORT` | `8800` | HTTP/WS port |
-| `VR_CONSOLE_CWD` | `cwd` | agent session cwd — a vr-lab campaign dir (drives MCP discovery) |
+| `VR_CONSOLE_HOST` | `127.0.0.1` | bind address — keep loopback; a LAN IP/`0.0.0.0` is refused by the Host check anyway |
+| `VR_CONSOLE_TOKEN` | *(random per launch)* | bearer token required on `/api/*`, `/ws`, `/debug`; set a fixed value behind a proxy |
+| `VR_CONSOLE_CWD` | `cwd` | the **default** session's cwd — a vr-lab campaign dir (drives MCP discovery) |
 | `VR_LAB_ROOT` | — | vr-lab checkout (campaign + programme read APIs) |
 | `DATABASE_URL` | — | optional Postgres (cost ledger, projection, approval audit) |
 | `VR_CONSOLE_WEB_DIST` | `…/vr-console-web/dist` | override the served SPA directory |
@@ -76,12 +87,14 @@ once, run several instances on different `PORT`s and `VR_CONSOLE_CWD`s.
 ## 4. Verify
 
 ```bash
-curl -s localhost:8800/api/health          # {"ok":true,"labRoot":"…","db":true|false}
-curl -s "localhost:8800/api/campaigns?scope=all"
-curl -s localhost:8800/api/programmes | head -c 200
+T=<token-from-startup>                                        # or your VR_CONSOLE_TOKEN
+curl -s "localhost:8800/api/health?token=$T"                  # {"ok":true,"labRoot":"…","db":true|false}
+curl -s "localhost:8800/api/campaigns?scope=all&token=$T"
+curl -s "localhost:8800/api/programmes?token=$T" | head -c 200
+# without the token: 401; from a cross-site Origin: 403
 ```
 
-Then open `http://localhost:8800`:
+Then open the launch URL printed at startup (it carries the token):
 
 - **Dashboard** — campaign tiles (+ cost tiles if Postgres is on).
 - **Campaign → Findings + Gates** — the board; click a finding for gate status + the

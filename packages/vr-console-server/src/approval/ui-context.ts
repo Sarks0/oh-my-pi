@@ -22,7 +22,13 @@ import type { Broadcast, PendingRegistry } from "./pending";
  * until then, run read-only tasks only, as the spike safety note requires. */
 function cap(text: string, n = 4000): string {
 	if (typeof text !== "string") return "";
-	return text.length > n ? text.slice(0, n) + "\n…[truncated " + (text.length - n) + " chars]" : text;
+	if (text.length <= n) return text;
+	// Don't cut between a surrogate pair: slicing mid-pair emits a lone surrogate
+	// that renders as a replacement char and can trip strict JSON consumers.
+	let end = n;
+	const last = text.charCodeAt(end - 1);
+	if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+	return text.slice(0, end) + "\n…[truncated " + (text.length - end) + " chars]";
 }
 
 /** Validate the browser's answer against the prompt; fail-closed to "deny". */

@@ -19,6 +19,7 @@
  */
 import { join } from "node:path";
 import { discoverSkills } from "@oh-my-pi/pi-coding-agent";
+import { checkAuth, makeToken } from "./auth";
 import { SessionRegistry } from "./session/registry";
 import { buildCoverageGraph, getCampaign, getFinding, listCampaigns, resolveEvidenceFile } from "./campaign/reader";
 import { composeGateRecordRequest, composePromoteRequest } from "./campaign/requests";
@@ -29,9 +30,15 @@ import { costSummary, recentUsage } from "./cost/ledger";
 import { listApprovalRecords } from "./approval/audit";
 
 const PORT = Number(process.env.PORT ?? 8800);
+// Bind loopback only: the console must never be reachable off the host. A LAN IP
+// or 0.0.0.0 would expose live agent control; the Host check rejects those too.
+const HOST = process.env.VR_CONSOLE_HOST ?? "127.0.0.1";
 const CWD = process.env.VR_CONSOLE_CWD ?? process.cwd();
 const LAB_ROOT = (process.env.VR_LAB_ROOT ?? "").trim();
 const DB_URL = (process.env.DATABASE_URL ?? "").trim();
+// Per-launch bearer token required on every /api/*, the /ws upgrade, and /debug.
+// Printed once at startup in the launch URL; override with VR_CONSOLE_TOKEN.
+const AUTH_TOKEN = (process.env.VR_CONSOLE_TOKEN ?? "").trim() || makeToken();
 
 // Optional Postgres: when DATABASE_URL is set, migrate + enable the cost ledger and
 // projection. Without it the console runs on FS reads alone.
@@ -267,15 +274,21 @@ interface WsData {
 
 const server = Bun.serve<WsData>({
 	port: PORT,
+	hostname: HOST,
 	async fetch(req, srv) {
 		const url = new URL(req.url);
 		if (url.pathname === "/ws") {
+			// Gate the upgrade: a cross-site page or a tokenless client never connects.
+			const deny = checkAuth(req, url, AUTH_TOKEN);
+			if (deny) return new Response(deny.message, { status: deny.status });
 			// A socket is bound to one session for its lifetime (chosen at connect time).
 			const sessionId = url.searchParams.get("session") || DEFAULT_ID;
 			if (srv.upgrade(req, { data: { sessionId } })) return;
 			return new Response("websocket upgrade failed", { status: 400 });
 		}
 		if (url.pathname.startsWith("/api/")) {
+			const deny = checkAuth(req, url, AUTH_TOKEN);
+			if (deny) return json({ error: deny.message }, deny.status);
 			try {
 				if (req.method === "POST" || req.method === "DELETE") {
 					const written = await handleApiWrite(url, req);
@@ -287,9 +300,15 @@ const server = Bun.serve<WsData>({
 				return json({ error: String(err) }, err instanceof Error && /VR_LAB_ROOT/.test(err.message) ? 400 : 500);
 			}
 		}
+		// The /debug raw event page is gated too; the static SPA shell is not (no data).
+		if (url.pathname === "/debug") {
+			const deny = checkAuth(req, url, AUTH_TOKEN);
+			if (deny) return new Response(deny.message, { status: deny.status });
+			return new Response(Bun.file(DEBUG_HTML), { headers: { "content-type": "text/html; charset=utf-8" } });
+		}
 		const web = await serveWeb(url.pathname);
 		if (web) return web;
-		if (url.pathname === "/" || url.pathname === "/index.html" || url.pathname === "/debug") {
+		if (url.pathname === "/" || url.pathname === "/index.html") {
 			return new Response(Bun.file(DEBUG_HTML), { headers: { "content-type": "text/html; charset=utf-8" } });
 		}
 		return new Response("not found", { status: 404 });
@@ -339,7 +358,9 @@ const server = Bun.serve<WsData>({
 	},
 });
 
-console.log(`[vr-console-server] http://localhost:${server.port}  (default cwd=${CWD})`);
+// The launch URL carries the token once; the SPA stores it and strips it from the bar.
+console.log(`[vr-console-server] open:  http://${HOST}:${server.port}/?token=${AUTH_TOKEN}`);
+console.log(`[vr-console-server] bound ${HOST}:${server.port}  (default cwd=${CWD})`);
 
 async function shutdown(): Promise<void> {
 	try {

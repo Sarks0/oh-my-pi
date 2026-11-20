@@ -1,7 +1,34 @@
 import type { ApprovalRecord, CampaignDetail, CampaignSummary, CoverageGraph, FindingDetail, McpInfo, ModelsInfo, Programme, SessionInfo, SessionListItem, SessionMeta, SkillsInfo, SwitchResult, WsFrame } from "./types";
 
+// Per-launch bearer token. The server prints a launch URL with ?token=…; we read
+// it once, keep it, and strip it from the address bar so it is not left on screen.
+// It then rides every request (Authorization header) and the WS + asset URLs (query).
+const TOKEN = (() => {
+	try {
+		const u = new URL(location.href);
+		const fromUrl = u.searchParams.get("token");
+		if (fromUrl) {
+			try { localStorage.setItem("vrc.token", fromUrl); } catch { /* private mode */ }
+			u.searchParams.delete("token");
+			history.replaceState(null, "", u.pathname + u.search + u.hash);
+			return fromUrl;
+		}
+		try { return localStorage.getItem("vrc.token") ?? ""; } catch { return ""; }
+	} catch {
+		return "";
+	}
+})();
+
+function authHeaders(extra?: Record<string, string>): Record<string, string> {
+	return { ...(extra ?? {}), ...(TOKEN ? { authorization: `Bearer ${TOKEN}` } : {}) };
+}
+/** `&token=…` (or empty) for URLs used as a WS endpoint or an asset src, where no header rides. */
+function tokenParam(): string {
+	return TOKEN ? `&token=${encodeURIComponent(TOKEN)}` : "";
+}
+
 async function getJson<T>(path: string): Promise<T> {
-	const r = await fetch(path);
+	const r = await fetch(path, { headers: authHeaders() });
 	const body = await r.json().catch(() => ({}));
 	if (!r.ok) throw new Error((body as { error?: string }).error ?? `HTTP ${r.status}`);
 	return body as T;
@@ -10,7 +37,7 @@ async function getJson<T>(path: string): Promise<T> {
 async function postJson<T>(path: string, body?: unknown): Promise<T> {
 	const r = await fetch(path, {
 		method: "POST",
-		headers: { "content-type": "application/json" },
+		headers: authHeaders({ "content-type": "application/json" }),
 		body: body !== undefined ? JSON.stringify(body) : undefined,
 	});
 	const d = await r.json().catch(() => ({}));
@@ -19,7 +46,7 @@ async function postJson<T>(path: string, body?: unknown): Promise<T> {
 }
 
 async function delJson<T>(path: string): Promise<T> {
-	const r = await fetch(path, { method: "DELETE" });
+	const r = await fetch(path, { method: "DELETE", headers: authHeaders() });
 	const d = await r.json().catch(() => ({}));
 	if (!r.ok) throw new Error((d as { error?: string }).error ?? `HTTP ${r.status}`);
 	return d as T;
@@ -36,7 +63,7 @@ export const api = {
 	finding: (campaignId: string, fid: string) =>
 		getJson<FindingDetail>(`/api/campaigns/${encodeURIComponent(campaignId)}/findings/${encodeURIComponent(fid)}`),
 	evidenceUrl: (campaignId: string, fid: string, rel: string) =>
-		`/api/campaigns/${encodeURIComponent(campaignId)}/findings/${encodeURIComponent(fid)}/file?path=${encodeURIComponent(rel)}`,
+		`/api/campaigns/${encodeURIComponent(campaignId)}/findings/${encodeURIComponent(fid)}/file?path=${encodeURIComponent(rel)}${tokenParam()}`,
 	programmes: () => getJson<Programme[]>("/api/programmes"),
 	approvals: () => getJson<ApprovalRecord[] | { enabled: false }>("/api/approvals"),
 	requestPromote: (campaignId: string, fid: string) =>
@@ -66,7 +93,7 @@ export function connectWs(sessionId: string, onFrame: (f: WsFrame) => void, onSt
 	let closed = false;
 	const open = () => {
 		const proto = location.protocol === "https:" ? "wss" : "ws";
-		ws = new WebSocket(`${proto}://${location.host}/ws?session=${encodeURIComponent(sessionId)}`);
+		ws = new WebSocket(`${proto}://${location.host}/ws?session=${encodeURIComponent(sessionId)}${tokenParam()}`);
 		ws.onopen = () => onStatus(true);
 		ws.onmessage = e => {
 			try {
