@@ -135,3 +135,15 @@ export interface SwitchResult {
 	current: ModelDTO | null;
 	error?: string;
 }
+export interface SessionMeta {
+	id: string;
+	cwd: string;
+	title: string;
+	createdAt: string;
+}
+export interface SessionListItem extends SessionMeta {
+	started: boolean;
+	model: string | null;
+	provider: string | null;
+	sockets: number;
+}

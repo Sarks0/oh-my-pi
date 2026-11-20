@@ -14,7 +14,7 @@ function assistantDelta(ev: WsFrame): string | null {
 	return null;
 }
 
-export function SessionPanel() {
+export function SessionPanel({ sessionId = "default" }: { sessionId?: string }) {
 	const [lines, setLines] = useState<LogLine[]>([]);
 	const [approvals, setApprovals] = useState<Approval[]>([]);
 	const [connected, setConnected] = useState(false);
@@ -23,6 +23,11 @@ export function SessionPanel() {
 	const logRef = useRef<HTMLDivElement | null>(null);
 
 	useEffect(() => {
+		// Switching sessions: tear down the old socket and clear the transcript;
+		// the new socket replays its own session's history on connect.
+		setLines([]);
+		setApprovals([]);
+		setConnected(false);
 		const push = (cls: string, t: string) => setLines(prev => [...prev, { cls, text: t }]);
 		const onFrame = (f: WsFrame) => {
 			switch (f.type) {
@@ -59,9 +64,9 @@ export function SessionPanel() {
 					break;
 			}
 		};
-		wsRef.current = connectWs(onFrame, setConnected);
+		wsRef.current = connectWs(sessionId, onFrame, setConnected);
 		return () => wsRef.current?.close();
-	}, []);
+	}, [sessionId]);
 
 	useEffect(() => {
 		if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
