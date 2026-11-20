@@ -3,6 +3,7 @@
  * (status=pending) and updated when it RESOLVES, so a crash leaves a pending/timeout
  * forensic trail. Projection only — campaign-mcp stays the gate/promotion authority.
  */
+import { appendFile } from "node:fs/promises";
 import type { ExtensionApprovalAnswer } from "@oh-my-pi/pi-coding-agent";
 import type { Db } from "../db/client";
 
@@ -55,6 +56,34 @@ export function makeDbAuditor(db: Db, ctx: { campaignId?: string; cwd?: string }
 		},
 		onResolve(id, answer) {
 			recordResolve(db, id, answer).catch(() => {});
+		},
+	};
+}
+
+/**
+ * Append-only JSONL auditor (P1-3): used when no Postgres is configured, so every
+ * approval still leaves a durable trail (one JSON line per raise and per resolve).
+ * Append is atomic for the small lines we write; a failed write never blocks the gate.
+ */
+export function makeFileAuditor(path: string, ctx: { campaignId?: string; cwd?: string }): ApprovalAuditor {
+	const write = (row: Record<string, unknown>): void => {
+		appendFile(path, JSON.stringify({ ts: new Date().toISOString(), ...row }) + "\n").catch(() => {});
+	};
+	return {
+		onRaise(id, info) {
+			write({
+				event: "raise",
+				id,
+				status: "pending",
+				campaignId: info.campaignId ?? ctx.campaignId ?? null,
+				cwd: info.cwd ?? ctx.cwd ?? null,
+				compact: info.compact ?? null,
+				sessionOffered: info.sessionOffered,
+			});
+		},
+		onResolve(id, answer) {
+			const { status, answer: ans } = classifyAnswer(answer);
+			write({ event: "resolve", id, status, answer: ans });
 		},
 	};
 }
