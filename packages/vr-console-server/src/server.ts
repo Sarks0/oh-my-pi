@@ -22,6 +22,7 @@ import { discoverSkills } from "@oh-my-pi/pi-coding-agent";
 import { checkAuth, makeToken } from "./auth";
 import { loadApprovalConfig } from "./approval/policy";
 import { SessionRegistry } from "./session/registry";
+import { createTask, getTask, graphStoreForTask, listTasks, setTaskStatus, type TaskStatus } from "./tasks/tasks";
 import { buildCoverageGraph, getCampaign, getFinding, listCampaigns, resolveEvidenceFile } from "./campaign/reader";
 import { composeGateRecordRequest, composePromoteRequest } from "./campaign/requests";
 import { listProgrammes } from "./programmes/reader";
@@ -138,6 +139,19 @@ async function handleApi(url: URL, method: string): Promise<Response | undefined
 	if (url.pathname === "/api/skills") {
 		return json(await readSkills(CWD));
 	}
+	// --- Tasks (autonomous orchestration; requires Postgres) ---
+	if (url.pathname === "/api/tasks") {
+		if (!db) return json({ enabled: false });
+		return json(await listTasks(db));
+	}
+	const taskM = url.pathname.match(/^\/api\/tasks\/(\d+)(?:\/(graph))?$/);
+	if (taskM && method === "GET") {
+		if (!db) return json({ enabled: false });
+		const id = Number(taskM[1]);
+		if (taskM[2] === "graph") return json(await graphStoreForTask(db, id).overview());
+		const t = await getTask(db, id);
+		return t ? json(t) : json({ error: "task not found" }, 404);
+	}
 	if (url.pathname === "/api/cost") {
 		return json(db ? await costSummary(db) : { enabled: false });
 	}
@@ -250,6 +264,35 @@ async function handleApiWrite(url: URL, req: Request): Promise<Response | undefi
 			await registry.dispose(sm.id);
 			return json({ disposed: true });
 		}
+	}
+
+	// --- Tasks: create + control (requires Postgres) ---
+	if (url.pathname === "/api/tasks" && req.method === "POST") {
+		if (!db) return json({ error: "Tasks require Postgres (set DATABASE_URL)" }, 400);
+		const body = (await req.json().catch(() => ({}))) as { goal?: string; name?: string; description?: string; category?: string; cwd?: string; config?: Record<string, unknown> };
+		if (typeof body.goal !== "string" || !body.goal.trim()) return json({ error: "goal is required" }, 400);
+		const task = await createTask(db, {
+			goal: body.goal.trim(),
+			name: body.name,
+			description: body.description,
+			category: body.category,
+			cwd: body.cwd ?? CWD,
+			config: body.config,
+		});
+		return json(task, 201);
+	}
+	const taskCtl = url.pathname.match(/^\/api\/tasks\/(\d+)\/control$/);
+	if (taskCtl && req.method === "POST") {
+		if (!db) return json({ error: "Tasks require Postgres" }, 400);
+		const id = Number(taskCtl[1]);
+		if (!(await getTask(db, id))) return json({ error: "task not found" }, 404);
+		const body = (await req.json().catch(() => ({}))) as { action?: string };
+		// T0: status transitions only; the autonomy engine (start/pause/resume) lands in T1.
+		const map: Record<string, TaskStatus> = { start: "running", pause: "paused", resume: "running", stop: "stopped" };
+		const status = body.action ? map[body.action] : undefined;
+		if (!status) return json({ error: `unknown action: ${body.action}` }, 400);
+		await setTaskStatus(db, id, status);
+		return json({ ok: true, status });
 	}
 
 	// --- back-compat (default session) model switch ---
