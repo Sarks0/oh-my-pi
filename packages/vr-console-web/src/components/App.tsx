@@ -10,6 +10,8 @@ import { Mcp } from "./Mcp";
 import { Skills } from "./Skills";
 import { Llm } from "./Llm";
 import { Sessions } from "./Sessions";
+import { Tasks } from "./Tasks";
+import { TaskView } from "./TaskView";
 import type { SessionListItem } from "../types";
 
 function SessionPage({ activeId, onSelect }: { activeId: string; onSelect: (id: string) => void }) {
@@ -56,6 +58,7 @@ const NAV_FUNCTIONS = [
 	{ label: "Surface Graph", href: "#/", hint: "open a campaign" },
 	{ label: "HITL Session", href: "#/session" },
 	{ label: "Sessions", href: "#/sessions" },
+	{ label: "Tasks", href: "#/tasks" },
 ];
 const NAV_SYSTEM: { label: string; href?: string }[] = [
 	{ label: "LLM", href: "#/llm" },
@@ -84,6 +87,7 @@ export function App() {
 	}, []);
 
 	const campaignMatch = hash.match(/^#\/campaign\/(.+)$/);
+	const taskMatch = hash.match(/^#\/task\/(\d+)$/);
 
 	return (
 		<div className="app">
@@ -113,7 +117,7 @@ export function App() {
 				</div>
 			</nav>
 			<main className="main">
-				{hash === "#/programmes" ? <Programmes /> : hash === "#/approvals" ? <ApprovalRecords /> : hash === "#/session" ? <SessionPage activeId={activeSession} onSelect={selectSession} /> : hash === "#/sessions" ? <Sessions activeId={activeSession} onOpen={openSession} /> : hash === "#/agent" ? <Agent /> : hash === "#/mcp" ? <Mcp /> : hash === "#/skills" ? <Skills /> : hash === "#/llm" ? <Llm /> : campaignMatch ? <CampaignView id={decodeURIComponent(campaignMatch[1])} /> : <Dashboard />}
+				{hash === "#/programmes" ? <Programmes /> : hash === "#/approvals" ? <ApprovalRecords /> : hash === "#/session" ? <SessionPage activeId={activeSession} onSelect={selectSession} /> : hash === "#/sessions" ? <Sessions activeId={activeSession} onOpen={openSession} /> : hash === "#/tasks" ? <Tasks onOpen={id => { location.hash = `#/task/${id}`; }} /> : taskMatch ? <TaskView id={Number(taskMatch[1])} onBack={() => { location.hash = "#/tasks"; }} /> : hash === "#/agent" ? <Agent /> : hash === "#/mcp" ? <Mcp /> : hash === "#/skills" ? <Skills /> : hash === "#/llm" ? <Llm /> : campaignMatch ? <CampaignView id={decodeURIComponent(campaignMatch[1])} /> : <Dashboard />}
 			</main>
 		</div>
 	);

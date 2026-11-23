@@ -147,3 +147,32 @@ export interface SessionListItem extends SessionMeta {
 	provider: string | null;
 	sockets: number;
 }
+
+// --- Tasks (autonomous orchestration) ---
+export interface TaskConfig {
+	concurrency?: number;
+	heartbeatMinutes?: number;
+	timeoutMinutes?: number | null;
+	dispatchFirstIntent?: boolean;
+	allowMutations?: boolean;
+	modelChain?: string[];
+}
+export type TaskStatus = "draft" | "running" | "paused" | "completed" | "timed_out" | "stopped";
+export interface Task {
+	id: number;
+	name: string | null;
+	goal: string;
+	description: string | null;
+	category: string | null;
+	cwd: string | null;
+	status: TaskStatus;
+	config: TaskConfig;
+	createdAt: string;
+}
+export interface TaskGraph {
+	goal: string | null;
+	frontierOpen: number;
+	running: number;
+	nodes: Array<{ id: number; kind: string; state: string; text: string }>;
+	edges: Array<{ from: number; to: number; rel: string }>;
+}
