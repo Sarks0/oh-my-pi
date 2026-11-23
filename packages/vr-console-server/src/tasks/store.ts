@@ -44,6 +44,8 @@ export interface GraphStore {
 	seed(goal: string): Promise<{ originId: number; goalId: number }>;
 	addIntent(text: string): Promise<GraphNode>;
 	claimIntent(): Promise<GraphNode | null>;
+	/** Return a running intent to the frontier (running → open) — pause/kill. */
+	releaseIntent(intentId: number): Promise<void>;
 	reportFact(intentId: number, text: string): Promise<GraphNode>;
 	overview(): Promise<GraphOverview>;
 }
@@ -86,6 +88,11 @@ export class MemGraphStore implements GraphStore {
 		if (!open) return null;
 		open.state = "running";
 		return open;
+	}
+
+	async releaseIntent(intentId: number): Promise<void> {
+		const intent = this.#nodes.find(n => n.id === intentId && n.kind === "intent");
+		if (intent && intent.state === "running") intent.state = "open";
 	}
 
 	async reportFact(intentId: number, text: string): Promise<GraphNode> {
@@ -169,6 +176,10 @@ export class PgGraphStore implements GraphStore {
 			)
 			RETURNING id, kind, state, text, intent_id`;
 		return rows.length ? toNode(rows[0]) : null;
+	}
+
+	async releaseIntent(intentId: number): Promise<void> {
+		await this.db`UPDATE exploration_nodes SET state='open' WHERE id=${intentId} AND task_id=${this.taskId} AND kind='intent' AND state='running'`;
 	}
 
 	async reportFact(intentId: number, text: string): Promise<GraphNode> {

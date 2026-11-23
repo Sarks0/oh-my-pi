@@ -22,7 +22,8 @@ import { discoverSkills } from "@oh-my-pi/pi-coding-agent";
 import { checkAuth, makeToken } from "./auth";
 import { loadApprovalConfig } from "./approval/policy";
 import { SessionRegistry } from "./session/registry";
-import { createTask, getTask, graphStoreForTask, listTasks, setTaskStatus, type TaskStatus } from "./tasks/tasks";
+import { createTask, getTask, graphStoreForTask, listTasks } from "./tasks/tasks";
+import { TaskManager } from "./tasks/manager";
 import { buildCoverageGraph, getCampaign, getFinding, listCampaigns, resolveEvidenceFile } from "./campaign/reader";
 import { composeGateRecordRequest, composePromoteRequest } from "./campaign/requests";
 import { listProgrammes } from "./programmes/reader";
@@ -216,6 +217,9 @@ console.log(
 const registry = new SessionRegistry({ db, approvalConfig, auditLogPath: AUDIT_LOG });
 registry.create({ id: DEFAULT_ID, cwd: CWD, title: campaignIdFromCwd(CWD) ?? "primary" });
 
+// Owns the live TaskEngine per running task (autonomous layer; Postgres-gated).
+const taskManager = db ? new TaskManager(db, CWD) : undefined;
+
 /** The default session's adapter — the target of the back-compat (unscoped) routes. */
 function defaultAdapter() {
 	const a = registry.adapter(DEFAULT_ID);
@@ -283,16 +287,25 @@ async function handleApiWrite(url: URL, req: Request): Promise<Response | undefi
 	}
 	const taskCtl = url.pathname.match(/^\/api\/tasks\/(\d+)\/control$/);
 	if (taskCtl && req.method === "POST") {
-		if (!db) return json({ error: "Tasks require Postgres" }, 400);
+		if (!db || !taskManager) return json({ error: "Tasks require Postgres" }, 400);
 		const id = Number(taskCtl[1]);
 		if (!(await getTask(db, id))) return json({ error: "task not found" }, 404);
 		const body = (await req.json().catch(() => ({}))) as { action?: string };
-		// T0: status transitions only; the autonomy engine (start/pause/resume) lands in T1.
-		const map: Record<string, TaskStatus> = { start: "running", pause: "paused", resume: "running", stop: "stopped" };
-		const status = body.action ? map[body.action] : undefined;
-		if (!status) return json({ error: `unknown action: ${body.action}` }, 400);
-		await setTaskStatus(db, id, status);
-		return json({ ok: true, status });
+		// Drive the autonomous engine (planner/worker loop) via the TaskManager.
+		switch (body.action) {
+			case "start":
+			case "resume":
+				await taskManager.start(id);
+				return json({ ok: true, status: "running" });
+			case "pause":
+				await taskManager.pause(id);
+				return json({ ok: true, status: "paused" });
+			case "stop":
+				await taskManager.stop(id);
+				return json({ ok: true, status: "stopped" });
+			default:
+				return json({ error: `unknown action: ${body.action}` }, 400);
+		}
 	}
 
 	// --- back-compat (default session) model switch ---
@@ -429,6 +442,7 @@ console.log(`[vr-console-server] bound ${HOST}:${server.port}  (default cwd=${CW
 
 async function shutdown(): Promise<void> {
 	try {
+		await taskManager?.disposeAll();
 		await registry.disposeAll();
 	} finally {
 		process.exit(0);
