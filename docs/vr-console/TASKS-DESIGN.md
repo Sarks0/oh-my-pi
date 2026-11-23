@@ -1,10 +1,12 @@
 # vr-console Tasks: an autonomous orchestration layer on omp
 
-Status: design. Nothing here is built yet. This spec defines how to add an
-**autonomous multi-agent "Tasks" layer** to vr-console, modelled on ARTEX's
-autonomous pentest engine but running on the omp SDK instead of the `norma`
-harness, and reusing the console's existing session registry, approval gate,
-cost ledger, and MCP discovery.
+Status: **built (T0–T3).** This spec defined, and the console now implements, an
+**autonomous multi-agent "Tasks" layer** modelled on ARTEX's autonomous pentest
+engine but running on the omp SDK instead of the `norma` harness, reusing the
+console's session registry, approval gate, cost ledger, and MCP discovery. The
+seam was de-risked by the T0 spike ([`tasks-t0-spike.md`](tasks-t0-spike.md));
+§11 tracks what shipped. The autonomous loop drives real omp sessions, so running
+a task end-to-end needs a model configured in omp on the host.
 
 Companion docs: [`DESIGN.md`](DESIGN.md) (the console itself), [`DEPLOYMENT.md`](DEPLOYMENT.md).
 
@@ -360,26 +362,39 @@ maintain. A lightweight console-side dedup (stack/finding hash) avoids duplicate
 
 ---
 
-## 11. Phased implementation
+## 11. Phased implementation — what shipped
 
-- **T0 — model + shell.** Postgres schema (§5); Tasks list + New-Task modal +
-  Task-detail shell; `GET/POST /api/tasks` + control. No autonomy yet (create +
-  inspect only). Make Postgres required when Tasks are enabled.
-- **T1 — the loop.** Planner + Worker roles (prompts + `customTools`); the
-  orchestration engine (planner round → frontier → bounded workers → facts →
-  re-trigger); pause/resume/steer/kill. Reuse the approval gate untouched.
-  Verify end-to-end on a CTF-style goal with `dispatch-first-intent`.
-- **T2 — graph UI + goals.** The exploration-graph DAG renderer; goal
-  decomposition + constraints; the heartbeat/deadlock backstop; the activity
-  timeline. Optional cold-graph digest folding.
-- **T3 — findings + report.** `report_finding` → vr-lab promote; dedup; the
-  report tab. Port an adversarial gate only if needed.
-- **Deferred.** Vault / traffic proxy / scope interception / LLM pool / asset
-  sync — add parity only where the vr-lab MCP + console surfaces fall short.
+- **T0 — model + shell. [done]** Postgres schema (§5: `tasks`,
+  `exploration_nodes`, `exploration_edges`, `task_activity`); the `GraphStore`
+  async interface with `MemGraphStore` + `PgGraphStore` (atomic claim via
+  `FOR UPDATE SKIP LOCKED`); task CRUD; `GET/POST /api/tasks` + `graph` + control;
+  the Tasks list + create form + detail shell. Postgres is required for Tasks.
+- **T1 — the loop. [done]** `TaskEngine` (`engine.ts`) with an injectable
+  `TaskAgentRunner`: serialized planner round → bounded worker pool draining the
+  frontier → re-trigger on change → heartbeat backstop → goal-met termination,
+  with pause/resume/stop (running intents return to the frontier). The real runner
+  (`runner-omp.ts`) is the planner/worker as omp sessions with the host tools;
+  `TaskManager` (`manager.ts`) owns the per-task engine and mirrors state. The
+  engine logic is unit-tested with a mock runner (no model); the omp-session path
+  is proven live up to the model boundary.
+- **T2 — graph UI + activity. [done]** The exploration-graph DAG renderer
+  (`TaskGraphView`, depth-layered, coloured by kind/relation); the `task_activity`
+  timeline (`GET /api/tasks/:id/activity`) with live polling while running.
+  (Cold-graph digest folding and multi-goal decomposition remain optional
+  follow-ups.)
+- **T3 — findings. [done]** `report_finding` (worker host tool + `store.reportFinding`)
+  → a `finding` node proved by its intent; the worker prompt uses it for an
+  evidenced finding; the task header shows fact/finding counts. (vr-lab
+  promote is the worker calling campaign-mcp separately — an approval-gated MCP
+  mutation — and a dedicated report tab/dedup is a later polish.)
+- **Deferred.** Steer/kill per-intent controls, WS task push (today the UI polls),
+  cold-graph digests, multi-goal decomposition, and ARTEX's vault / traffic proxy
+  / scope interception / LLM pool / asset sync — the vr-lab MCP + the console's
+  existing surfaces cover most; add parity where a gap bites.
 
-Each increment ships with unit tests (graph store, frontier claim, planner-round
-contract, control transitions) + a live end-to-end check, matching the console's
-existing test discipline.
+Each increment shipped with unit tests (graph store, frontier claim, engine
+loop/termination/control, finding contract) and a live check, matching the
+console's test discipline.
 
 ---
 

@@ -151,3 +151,36 @@ Then open the launch URL printed at startup (it carries the token):
 - **Remote access**: keep it on loopback. To reach it from elsewhere, front it with an
   SSH tunnel or an mTLS reverse proxy — do not bind `0.0.0.0` on a lab network.
 ```
+
+## 9. Tasks (autonomous layer)
+
+The **Tasks** page runs autonomous campaigns: a planner decomposes a goal into
+intents, a bounded worker pool pursues them and reports facts/findings, and the
+exploration graph drives the planner until the goal is met. See
+[`TASKS-DESIGN.md`](TASKS-DESIGN.md).
+
+Requirements:
+
+- **Postgres** (`DATABASE_URL`) — the exploration graph / frontier is live
+  operational state. Tasks are disabled (the page shows a hint) without it.
+- **A model configured in omp on the host** — the planner and worker are real omp
+  sessions. Without a working model a task starts but produces no intents/facts.
+
+Run a task:
+
+1. **Tasks → new task**: a goal (required), an optional name and working dir (a
+   campaign dir, so the workers discover the vr-lab MCP tools), and whether to
+   **allow mutating tools**. Creating it seeds the graph (origin fact + goal).
+2. **Open it → start.** The engine runs: watch the **Exploration graph** (goal →
+   intents → facts → findings) and the **Activity** timeline advance live.
+   **pause** returns running intents to the frontier; **stop** ends it.
+
+Safety: every real worker tool call still goes through the always-ask approval
+gate. Under the default **read-only-only** posture (no `VR_CONSOLE_ALLOW_MUTATIONS`)
+a task does reconnaissance only — mutating tools are denied until you opt in. The
+graph bookkeeping tools (`add_intent`, `report_fact`, …) are read-tier, so they run
+without a card and do not drown you in approvals.
+
+Per-task knobs live in the task `config` (jsonb): `concurrency` (max workers),
+`heartbeatMinutes` (deadlock backstop), `allowMutations`. One server hosts many
+tasks; each runs its own engine.
