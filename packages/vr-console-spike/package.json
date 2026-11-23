@@ -1,0 +1,19 @@
+{
+	"name": "@oh-my-pi/vr-console-spike",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "Phase 0 spike: embed the omp SDK in-process and stream one agent session to a browser over WebSocket.",
+	"bin": {
+		"omp-vr-spike": "src/server.ts"
+	},
+	"scripts": {
+		"start": "bun run src/server.ts"
+	},
+	"dependencies": {
+		"@oh-my-pi/pi-coding-agent": "catalog:"
+	},
+	"devDependencies": {
+		"@types/bun": "catalog:"
+	}
+}
