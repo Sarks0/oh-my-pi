@@ -12,7 +12,7 @@
  * Run:  bun run packages/vr-console-server/src/tasks/spike-run.ts
  */
 import { createAgentSession, SessionManager, Settings } from "@oh-my-pi/pi-coding-agent";
-import { GraphStore } from "./store";
+import { MemGraphStore } from "./store";
 import { makeTaskHostTools } from "./host-tools";
 
 const GOAL = "Prove a low-priv -> SYSTEM EOP in the demo driver";
@@ -43,8 +43,8 @@ function log(step: string): void {
 
 async function main(): Promise<void> {
 	const cwd = process.cwd();
-	const store = new GraphStore();
-	store.seed(GOAL);
+	const store = new MemGraphStore();
+	await store.seed(GOAL);
 	const tools = makeTaskHostTools(store);
 
 	log("1. planner session: emit two intents toward the goal");
@@ -60,7 +60,7 @@ async function main(): Promise<void> {
 	} finally {
 		await planner.dispose();
 	}
-	console.log(`  frontier open after planner: ${store.overview().frontierOpen}`);
+	console.log(`  frontier open after planner: ${(await store.overview()).frontierOpen}`);
 
 	log("2. worker session: claim one intent and report a fact");
 	const worker = await makeSession(cwd, tools);
@@ -76,7 +76,7 @@ async function main(): Promise<void> {
 	}
 
 	log("3. final exploration graph");
-	const o = store.overview();
+	const o = await store.overview();
 	console.log(JSON.stringify(o, null, 2));
 
 	const facts = o.nodes.filter(n => n.kind === "fact" && n.state === "confirmed").length;

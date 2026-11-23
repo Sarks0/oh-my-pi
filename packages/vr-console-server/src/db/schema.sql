@@ -86,3 +86,50 @@ CREATE TABLE IF NOT EXISTS approval_records (
 	decided_at       TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS approval_records_raised_idx ON approval_records (raised_at DESC);
+
+-- ============================================================================
+-- Tasks: the autonomous orchestration layer (TASKS-DESIGN §5). The exploration
+-- graph + frontier is live operational state, so it lives in Postgres (findings
+-- and evidence stay vr-lab filesystem-truth; a `finding` node is a pointer).
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS tasks (
+	id          BIGSERIAL PRIMARY KEY,
+	name        TEXT,
+	goal        TEXT NOT NULL,
+	description TEXT,
+	category    TEXT,
+	cwd         TEXT,
+	status      TEXT NOT NULL DEFAULT 'draft',   -- draft|running|paused|completed|timed_out|stopped
+	config      JSONB NOT NULL DEFAULT '{}',      -- concurrency, heartbeat, timeout, model chain, allow_mutations
+	created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS exploration_nodes (
+	id         BIGSERIAL PRIMARY KEY,
+	task_id    BIGINT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+	kind       TEXT NOT NULL,   -- goal|intent|fact|finding|hint
+	state      TEXT NOT NULL,   -- origin|active|open|running|done|confirmed|...
+	text       TEXT NOT NULL,
+	intent_id  BIGINT,          -- for a fact: the intent it answers
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+-- The frontier query (intents by state) and per-task reads hit this index.
+CREATE INDEX IF NOT EXISTS exploration_nodes_frontier_idx ON exploration_nodes (task_id, kind, state);
+
+CREATE TABLE IF NOT EXISTS exploration_edges (
+	id       BIGSERIAL PRIMARY KEY,
+	task_id  BIGINT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+	from_id  BIGINT NOT NULL,
+	to_id    BIGINT NOT NULL,
+	rel      TEXT NOT NULL      -- spawns|yields|proves|derived_from
+);
+CREATE INDEX IF NOT EXISTS exploration_edges_task_idx ON exploration_edges (task_id);
+
+CREATE TABLE IF NOT EXISTS task_activity (
+	id       BIGSERIAL PRIMARY KEY,
+	task_id  BIGINT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+	ts       TIMESTAMPTZ NOT NULL DEFAULT now(),
+	kind     TEXT NOT NULL,     -- planner_round|intent_added|fact_recorded|status_change|...
+	detail   TEXT
+);
+CREATE INDEX IF NOT EXISTS task_activity_task_idx ON task_activity (task_id, ts DESC);

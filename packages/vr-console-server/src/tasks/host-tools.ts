@@ -34,7 +34,7 @@ export function makeTaskHostTools(store: GraphStore): CustomTool[] {
 			parameters: objectSchema({}),
 			approval: "read",
 			async execute() {
-				return text(JSON.stringify(store.overview()));
+				return text(JSON.stringify(await store.overview()));
 			},
 		},
 		{
@@ -45,7 +45,7 @@ export function makeTaskHostTools(store: GraphStore): CustomTool[] {
 			approval: "read",
 			async execute(_id: string, params: unknown) {
 				const p = params as { text: string };
-				const n = store.addIntent(p.text);
+				const n = await store.addIntent(p.text);
 				return text(`intent #${n.id} added to the frontier`);
 			},
 		},
@@ -56,7 +56,7 @@ export function makeTaskHostTools(store: GraphStore): CustomTool[] {
 			parameters: objectSchema({}),
 			approval: "read",
 			async execute() {
-				const n = store.claimIntent();
+				const n = await store.claimIntent();
 				return text(n ? JSON.stringify({ intentId: n.id, text: n.text }) : "no open intents");
 			},
 		},
@@ -74,7 +74,7 @@ export function makeTaskHostTools(store: GraphStore): CustomTool[] {
 			approval: "read",
 			async execute(_id: string, params: unknown) {
 				const p = params as { intentId: number; text: string };
-				const f = store.reportFact(p.intentId, p.text);
+				const f = await store.reportFact(p.intentId, p.text);
 				return text(`fact #${f.id} recorded (yields intent #${p.intentId})`);
 			},
 		},
