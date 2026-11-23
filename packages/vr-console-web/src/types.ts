@@ -176,3 +176,9 @@ export interface TaskGraph {
 	nodes: Array<{ id: number; kind: string; state: string; text: string }>;
 	edges: Array<{ from: number; to: number; rel: string }>;
 }
+export interface TaskActivity {
+	id: number;
+	ts: string;
+	kind: string;
+	detail: string | null;
+}

@@ -90,6 +90,24 @@ export async function setTaskStatus(db: Db, id: number, status: TaskStatus): Pro
 	await db`INSERT INTO task_activity (task_id, kind, detail) VALUES (${id}, 'status_change', ${status})`;
 }
 
+export interface TaskActivity {
+	id: number;
+	ts: string;
+	kind: string;
+	detail: string | null;
+}
+
+/** Recent activity for a task (planner rounds, dispatches, facts, status), newest first. */
+export async function listActivity(db: Db, id: number, limit = 100): Promise<TaskActivity[]> {
+	const rows = await db`SELECT id, ts, kind, detail FROM task_activity WHERE task_id=${id} ORDER BY id DESC LIMIT ${limit}`;
+	return rows.map((r: { id: unknown; ts: string | Date; kind: string; detail: string | null }) => ({
+		id: Number(r.id),
+		ts: typeof r.ts === "string" ? r.ts : r.ts.toISOString(),
+		kind: r.kind,
+		detail: r.detail,
+	}));
+}
+
 /** A graph store bound to a task. */
 export function graphStoreForTask(db: Db, id: number): PgGraphStore {
 	return new PgGraphStore(db, id);

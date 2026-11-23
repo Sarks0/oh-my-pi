@@ -47,6 +47,14 @@ suite("Tasks on Postgres — persistence + the graph store contract", () => {
 		expect(ov.frontierOpen).toBe(1); // one intent still open
 		expect(ov.running).toBe(0); // the claimed one settled to done
 		expect(ov.edges.some(e => e.rel === "yields")).toBe(true);
+
+		// a worker proves a finding on the remaining intent
+		const claimed2 = await store.claimIntent();
+		const finding = await store.reportFinding(claimed2!.id, "confirmed EOP");
+		expect(finding.kind).toBe("finding");
+		const ov2 = await store.overview();
+		expect(ov2.nodes.some(n => n.kind === "finding" && n.state === "confirmed")).toBe(true);
+		expect(ov2.edges.some(e => e.rel === "proves")).toBe(true);
 	});
 
 	test("claimIntent is atomic: each open intent is claimed at most once", async () => {

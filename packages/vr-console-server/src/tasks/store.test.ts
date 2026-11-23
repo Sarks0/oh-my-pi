@@ -48,6 +48,16 @@ describe("MemGraphStore — the exploration graph contract", () => {
 		await s.seed("g");
 		expect(s.reportFact(999, "x")).rejects.toThrow(/no such intent/);
 	});
+
+	test("reportFinding records a finding node proved by its intent", async () => {
+		const s = new MemGraphStore();
+		await s.seed("g");
+		const i = await s.addIntent("x");
+		const f = await s.reportFinding(i.id, "EOP via 0x222000: attacker length → SYSTEM write");
+		expect(f).toMatchObject({ kind: "finding", state: "confirmed" });
+		expect(s.edges()).toContainEqual({ from: i.id, to: f.id, rel: "proves" });
+		expect((await s.overview()).nodes.filter(n => n.kind === "finding")).toHaveLength(1);
+	});
 });
 
 describe("task host tools — the planner/worker seam", () => {

@@ -22,7 +22,7 @@ import { discoverSkills } from "@oh-my-pi/pi-coding-agent";
 import { checkAuth, makeToken } from "./auth";
 import { loadApprovalConfig } from "./approval/policy";
 import { SessionRegistry } from "./session/registry";
-import { createTask, getTask, graphStoreForTask, listTasks } from "./tasks/tasks";
+import { createTask, getTask, graphStoreForTask, listActivity, listTasks } from "./tasks/tasks";
 import { TaskManager } from "./tasks/manager";
 import { buildCoverageGraph, getCampaign, getFinding, listCampaigns, resolveEvidenceFile } from "./campaign/reader";
 import { composeGateRecordRequest, composePromoteRequest } from "./campaign/requests";
@@ -145,11 +145,12 @@ async function handleApi(url: URL, method: string): Promise<Response | undefined
 		if (!db) return json({ enabled: false });
 		return json(await listTasks(db));
 	}
-	const taskM = url.pathname.match(/^\/api\/tasks\/(\d+)(?:\/(graph))?$/);
+	const taskM = url.pathname.match(/^\/api\/tasks\/(\d+)(?:\/(graph|activity))?$/);
 	if (taskM && method === "GET") {
 		if (!db) return json({ enabled: false });
 		const id = Number(taskM[1]);
 		if (taskM[2] === "graph") return json(await graphStoreForTask(db, id).overview());
+		if (taskM[2] === "activity") return json(await listActivity(db, id));
 		const t = await getTask(db, id);
 		return t ? json(t) : json({ error: "task not found" }, 404);
 	}

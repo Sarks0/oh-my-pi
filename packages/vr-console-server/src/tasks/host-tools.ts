@@ -78,6 +78,25 @@ export function makeTaskHostTools(store: GraphStore): CustomTool[] {
 				return text(`fact #${f.id} recorded (yields intent #${p.intentId})`);
 			},
 		},
+		{
+			name: "report_finding",
+			label: "Report finding",
+			description:
+				"Record a confirmed vulnerability finding proved by the intent you claimed. Use ONLY for a real, evidenced security finding (not an ordinary fact). To promote it in vr-lab, call the campaign-mcp tool separately; this records it in the task graph.",
+			parameters: objectSchema(
+				{
+					intentId: { type: "number", description: "The id returned by claim_intent." },
+					text: { type: "string", description: "The finding: what it is, and the impact." },
+				},
+				["intentId", "text"],
+			),
+			approval: "read",
+			async execute(_id: string, params: unknown) {
+				const p = params as { intentId: number; text: string };
+				const f = await store.reportFinding(p.intentId, p.text);
+				return text(`finding #${f.id} recorded (proves intent #${p.intentId})`);
+			},
+		},
 	];
 	return tools as unknown as CustomTool[];
 }

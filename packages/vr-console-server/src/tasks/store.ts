@@ -47,6 +47,8 @@ export interface GraphStore {
 	/** Return a running intent to the frontier (running → open) — pause/kill. */
 	releaseIntent(intentId: number): Promise<void>;
 	reportFact(intentId: number, text: string): Promise<GraphNode>;
+	/** Record a confirmed finding proved by an intent (finding node + `proves` edge). */
+	reportFinding(intentId: number, text: string): Promise<GraphNode>;
 	overview(): Promise<GraphOverview>;
 }
 
@@ -103,6 +105,14 @@ export class MemGraphStore implements GraphStore {
 		this.#edge(intentId, fact.id, "yields");
 		intent.state = "done";
 		return fact;
+	}
+
+	async reportFinding(intentId: number, text: string): Promise<GraphNode> {
+		const intent = this.#nodes.find(n => n.id === intentId && n.kind === "intent");
+		if (!intent) throw new Error(`no such intent: ${intentId}`);
+		const finding = this.#add("finding", "confirmed", text);
+		this.#edge(intentId, finding.id, "proves");
+		return finding;
 	}
 
 	async overview(): Promise<GraphOverview> {
@@ -189,6 +199,14 @@ export class PgGraphStore implements GraphStore {
 		await this.db`INSERT INTO exploration_edges (task_id, from_id, to_id, rel) VALUES (${this.taskId}, ${intentId}, ${fact.id}, 'yields')`;
 		await this.db`UPDATE exploration_nodes SET state='done' WHERE id=${intentId}`;
 		return toNode(fact);
+	}
+
+	async reportFinding(intentId: number, text: string): Promise<GraphNode> {
+		const [intent] = await this.db`SELECT id FROM exploration_nodes WHERE id=${intentId} AND task_id=${this.taskId} AND kind='intent'`;
+		if (!intent) throw new Error(`no such intent: ${intentId}`);
+		const [finding] = await this.db`INSERT INTO exploration_nodes (task_id, kind, state, text) VALUES (${this.taskId}, 'finding', 'confirmed', ${text}) RETURNING id, kind, state, text, intent_id`;
+		await this.db`INSERT INTO exploration_edges (task_id, from_id, to_id, rel) VALUES (${this.taskId}, ${intentId}, ${finding.id}, 'proves')`;
+		return toNode(finding);
 	}
 
 	async overview(): Promise<GraphOverview> {

@@ -1,4 +1,4 @@
-import type { ApprovalRecord, CampaignDetail, CampaignSummary, CoverageGraph, FindingDetail, McpInfo, ModelsInfo, Programme, SessionInfo, SessionListItem, SessionMeta, SkillsInfo, SwitchResult, Task, TaskConfig, TaskGraph, WsFrame } from "./types";
+import type { ApprovalRecord, CampaignDetail, CampaignSummary, CoverageGraph, FindingDetail, McpInfo, ModelsInfo, Programme, SessionInfo, SessionListItem, SessionMeta, SkillsInfo, SwitchResult, Task, TaskActivity, TaskConfig, TaskGraph, WsFrame } from "./types";
 
 // Per-launch bearer token. The server prints a launch URL with ?token=…; we read
 // it once, keep it, and strip it from the address bar so it is not left on screen.
@@ -84,6 +84,7 @@ export const api = {
 	tasks: () => getJson<Task[] | { enabled: false }>("/api/tasks"),
 	task: (id: number) => getJson<Task>(`/api/tasks/${id}`),
 	taskGraph: (id: number) => getJson<TaskGraph>(`/api/tasks/${id}/graph`),
+	taskActivity: (id: number) => getJson<TaskActivity[]>(`/api/tasks/${id}/activity`),
 	createTask: (input: { goal: string; name?: string; description?: string; category?: string; cwd?: string; config?: TaskConfig }) =>
 		postJson<Task>("/api/tasks", input),
 	taskControl: (id: number, action: "start" | "pause" | "resume" | "stop") =>

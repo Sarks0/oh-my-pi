@@ -63,7 +63,7 @@ function plannerPrompt(goal: string): string {
 function workerPrompt(intent: GraphNode): string {
 	return (
 		`You are a task WORKER. You have claimed this intent:\n"#${intent.id}: ${intent.text}"\n\n` +
-		`Do the work to satisfy it using your real tools, then call report_fact with intentId=${intent.id} and a concise result (including a negative result if that is the outcome). Report every concrete fact you establish. Then stop. Do not invent new directions — that is the planner's job.`
+		`Do the work to satisfy it using your real tools, then call report_fact with intentId=${intent.id} and a concise result (including a negative result if that is the outcome). Report every concrete fact you establish. If you prove a real, evidenced security finding, call report_finding (intentId=${intent.id}) as well. Then stop. Do not invent new directions — that is the planner's job.`
 	);
 }
 
